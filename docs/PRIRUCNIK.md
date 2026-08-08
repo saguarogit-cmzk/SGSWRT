@@ -406,6 +406,14 @@ uređaju. Velike liste troše memoriju, pa provjeri veličinu prije upotrebe.
 - **Pravila prometa**: dopusti (ACCEPT), odbij (REJECT) ili tiho odbaci (DROP)
   promet po zonama, adresama/CIDR-ima i portovima. Prazno odredište znači
   "prema samom uređaju" (npr. dopusti SSH s WAN-a).
+- **Redoslijed pravila**: unutar istog lanca (ista izvor→odredište zona) paket
+  obrađuje **prvo pravilo koje mu odgovara**, pa redoslijed odlučuje. Strelicama
+  ▲/▼ u tablici pravilo se pomiče gore-dolje; promjena vrijedi nakon *Primijeni*.
+- **Pogodaka + dnevnik**: stupac **Pogodaka** pokazuje koliko je paketa svako
+  pravilo uhvatilo (brojač iz jezgre), a u tooltipu i koliko bajtova. Uz
+  kvačicu **Zapisuj u dnevnik** pravilo bilježi pakete koje uhvati; ti se zapisi
+  vide u kartici **Dnevnik firewalla** ispod (vrijeme, ulaz/izlaz, izvor,
+  odredište, protokol, port) — tu se vidi *zašto* nešto ne prolazi, bez SSH-a.
 - **Vremenska pravila**: svako pravilo može vrijediti samo u zadanom razdoblju
   dana i na odabrane dane — *„gosti na internet 08–18"*, *„djeci bez interneta
   poslije 22"*. Dani se biraju kvačicama, a stupac **Kada** u tablici pokazuje

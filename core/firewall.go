@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -88,22 +91,25 @@ type FWRule struct {
 	StartTime string `json:"start_time"`
 	StopTime  string `json:"stop_time"`
 	Weekdays  string `json:"weekdays"`
+	Log       bool   `json:"log"`
 	Enabled   bool   `json:"enabled"`
 	Notes     string `json:"notes"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	Hits      int64  `json:"hits"`  // pogodaka (nft counter), popunjava se u listi
+	Bytes     int64  `json:"bytes"` // bajtova (nft counter)
 }
 
 const ruleCols = `uuid, name, family, proto, src_zone, COALESCE(src_ip,''),
 	COALESCE(dest_zone,''), COALESCE(dest_ip,''), COALESCE(dest_port,''),
 	target, COALESCE(start_time,''), COALESCE(stop_time,''),
-	COALESCE(weekdays,''), enabled, COALESCE(notes,''), created_at, updated_at`
+	COALESCE(weekdays,''), log, enabled, COALESCE(notes,''), created_at, updated_at`
 
 func scanRule(row interface{ Scan(...any) error }) (FWRule, error) {
 	var f FWRule
 	err := row.Scan(&f.UUID, &f.Name, &f.Family, &f.Proto, &f.SrcZone, &f.SrcIP,
 		&f.DestZone, &f.DestIP, &f.DestPort, &f.Target, &f.StartTime,
-		&f.StopTime, &f.Weekdays, &f.Enabled, &f.Notes,
+		&f.StopTime, &f.Weekdays, &f.Log, &f.Enabled, &f.Notes,
 		&f.CreatedAt, &f.UpdatedAt)
 	return f, err
 }
@@ -433,7 +439,7 @@ type fwRuleIn struct {
 }
 
 func (s *server) handleFWRuleList(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(`SELECT ` + ruleCols + ` FROM fw_rules ORDER BY name`)
+	rows, err := s.db.Query(`SELECT ` + ruleCols + ` FROM fw_rules ORDER BY pos, created_at`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -448,7 +454,118 @@ func (s *server) handleFWRuleList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, f)
 	}
+	// brojači pogodaka iz žive nftables tablice (fw4 svakom pravilu daje
+	// counter i komentar "!fw4: <ime>"); mapira se po imenu pravila
+	counters := fw4Counters(r.Context())
+	for i := range out {
+		if c, ok := counters[out[i].Name]; ok {
+			out[i].Hits = c.packets
+			out[i].Bytes = c.bytes
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"rules": out})
+}
+
+type nftCounter struct{ packets, bytes int64 }
+
+// fw4Counters čita broj pogodaka i bajtova po pravilu iz žive nftables tablice.
+// fw4 svako pravilo označi komentarom "!fw4: <ime pravila>" i doda counter, pa
+// se brojači vežu uz Saguaro pravila preko imena. Isto ime na više pravila se
+// zbraja.
+func fw4Counters(ctx context.Context) map[string]nftCounter {
+	res := map[string]nftCounter{}
+	out, err := exec.CommandContext(ctx, "nft", "-j", "list", "table", "inet", "fw4").Output()
+	if err != nil {
+		return res
+	}
+	var doc struct {
+		Nftables []struct {
+			Rule *struct {
+				Comment string `json:"comment"`
+				Expr    []struct {
+					Counter *struct {
+						Packets int64 `json:"packets"`
+						Bytes   int64 `json:"bytes"`
+					} `json:"counter"`
+				} `json:"expr"`
+			} `json:"rule"`
+		} `json:"nftables"`
+	}
+	if json.Unmarshal(out, &doc) != nil {
+		return res
+	}
+	for _, item := range doc.Nftables {
+		r := item.Rule
+		if r == nil || !strings.HasPrefix(r.Comment, "!fw4: ") {
+			continue
+		}
+		name := strings.TrimPrefix(r.Comment, "!fw4: ")
+		for _, e := range r.Expr {
+			if e.Counter != nil {
+				c := res[name]
+				c.packets += e.Counter.Packets
+				c.bytes += e.Counter.Bytes
+				res[name] = c
+			}
+		}
+	}
+	return res
+}
+
+// handleFWLog vraća zadnje zapise firewalla iz kernel loga (logread). Prikazuju
+// se odbačeni/zabilježeni paketi — po pravilima s uključenim dnevnikom i po
+// zadanim odbacivanjima fw4. Bez ovoga se "zašto ovo ne prolazi" moralo tražiti
+// po SSH-u.
+func (s *server) handleFWLog(w http.ResponseWriter, r *http.Request) {
+	out, err := exec.CommandContext(r.Context(), "logread").Output()
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "logread: "+err.Error())
+		return
+	}
+	type entry struct {
+		Time  string `json:"time"`
+		Src   string `json:"src"`
+		Dst   string `json:"dst"`
+		In    string `json:"in"`
+		Out   string `json:"out"`
+		Proto string `json:"proto"`
+		Dport string `json:"dport"`
+		Raw   string `json:"raw"`
+	}
+	lines := strings.Split(string(out), "\n")
+	entries := []entry{}
+	for i := len(lines) - 1; i >= 0 && len(entries) < 200; i-- {
+		l := lines[i]
+		if !strings.Contains(l, "SRC=") || !strings.Contains(l, "DST=") {
+			continue
+		}
+		e := entry{Raw: strings.TrimSpace(l)}
+		// vrijeme je prvi dio logread retka (do "kernel:")
+		if k := strings.Index(l, "kernel:"); k > 0 {
+			e.Time = strings.TrimSpace(l[:k])
+		}
+		e.Src = logField(l, "SRC=")
+		e.Dst = logField(l, "DST=")
+		e.In = logField(l, "IN=")
+		e.Out = logField(l, "OUT=")
+		e.Proto = logField(l, "PROTO=")
+		e.Dport = logField(l, "DPT=")
+		entries = append(entries, e)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// logField vadi vrijednost polja KEY=vrijednost iz netfilter LOG retka.
+func logField(line, key string) string {
+	i := strings.Index(line, key)
+	if i < 0 {
+		return ""
+	}
+	rest := line[i+len(key):]
+	if j := strings.IndexAny(rest, " \t"); j >= 0 {
+		return rest[:j]
+	}
+	return rest
 }
 
 func (s *server) handleFWRuleCreate(w http.ResponseWriter, r *http.Request) {
@@ -461,13 +578,16 @@ func (s *server) handleFWRuleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.UUID = newUUID()
+	// novo pravilo ide na kraj popisa (najveći pos + 1)
+	var maxPos int
+	s.db.QueryRow(`SELECT COALESCE(MAX(pos),0) FROM fw_rules`).Scan(&maxPos)
 	_, err := s.db.Exec(`INSERT INTO fw_rules
 		(uuid, name, family, proto, src_zone, src_ip, dest_zone, dest_ip,
-		 dest_port, target, start_time, stop_time, weekdays, enabled, notes)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 dest_port, target, start_time, stop_time, weekdays, log, enabled, notes, pos)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		f.UUID, f.Name, f.Family, f.Proto, f.SrcZone, f.SrcIP, f.DestZone,
 		f.DestIP, f.DestPort, f.Target, f.StartTime, f.StopTime, f.Weekdays,
-		enabledIntOf(in.Enabled), f.Notes)
+		boolInt(f.Log), enabledIntOf(in.Enabled), f.Notes, maxPos+1)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -489,11 +609,11 @@ func (s *server) handleFWRuleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.db.Exec(`UPDATE fw_rules SET name=?, family=?, proto=?,
 		src_zone=?, src_ip=?, dest_zone=?, dest_ip=?, dest_port=?, target=?,
-		start_time=?, stop_time=?, weekdays=?, enabled=?, notes=?,
+		start_time=?, stop_time=?, weekdays=?, log=?, enabled=?, notes=?,
 		updated_at=datetime('now') WHERE uuid=?`,
 		f.Name, f.Family, f.Proto, f.SrcZone, f.SrcIP, f.DestZone, f.DestIP,
 		f.DestPort, f.Target, f.StartTime, f.StopTime, f.Weekdays,
-		enabledIntOf(in.Enabled), f.Notes, uuid)
+		boolInt(f.Log), enabledIntOf(in.Enabled), f.Notes, uuid)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -518,6 +638,58 @@ func (s *server) handleFWRuleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("uuid")})
+}
+
+// handleFWRuleMove mijenja redoslijed pravila zamjenom sa susjednim. Redoslijed
+// je bitan unutar istog lanca (ista izvor→odredište zona): paket obrađuje prvo
+// pravilo koje mu odgovara. Promjena vrijedi nakon Primijeni.
+func (s *server) handleFWRuleMove(w http.ResponseWriter, r *http.Request) {
+	uuid := r.PathValue("uuid")
+	var in struct {
+		Dir string `json:"dir"` // up | down
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	rows, err := s.db.Query(`SELECT uuid FROM fw_rules ORDER BY pos, created_at`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var order []string
+	for rows.Next() {
+		var u string
+		rows.Scan(&u)
+		order = append(order, u)
+	}
+	rows.Close()
+	idx := -1
+	for i, u := range order {
+		if u == uuid {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		writeErr(w, http.StatusNotFound, "pravilo ne postoji")
+		return
+	}
+	other := idx - 1
+	if in.Dir == "down" {
+		other = idx + 1
+	}
+	if other < 0 || other >= len(order) {
+		writeJSON(w, http.StatusOK, map[string]any{"moved": false})
+		return
+	}
+	order[idx], order[other] = order[other], order[idx]
+	// redoslijed se ispiše iznova 1..n — ostaje uredan i kad su stari pos-ovi 0
+	for i, u := range order {
+		if _, err := s.db.Exec(`UPDATE fw_rules SET pos=? WHERE uuid=?`, i+1, u); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"moved": true})
 }
 
 /* ---------- aliasi (imenovane grupe adresa) ---------- */
@@ -901,7 +1073,7 @@ func (s *server) handleFWApply(w http.ResponseWriter, r *http.Request) {
 	fRows.Close()
 
 	rRows, err := s.db.Query(`SELECT ` + ruleCols + ` FROM fw_rules
-		WHERE enabled = 1 ORDER BY name`)
+		WHERE enabled = 1 ORDER BY pos, created_at`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1020,8 +1192,11 @@ func (s *server) handleFWApply(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	for _, f := range rules {
-		sn := rlPrefix + strings.ReplaceAll(f.UUID, "-", "")[:8]
+	for i, f := range rules {
+		// redni broj u nazivu sekcije čuva redoslijed: fw4 pravila unutar
+		// istog lanca (ista izvor→odredište zona) primjenjuje redom kojim su
+		// zapisana, a uci ih drži poredane po imenu sekcije
+		sn := fmt.Sprintf("%s%03d_%s", rlPrefix, i, strings.ReplaceAll(f.UUID, "-", "")[:6])
 		fmt.Fprintf(&b, "set firewall.%s=rule\n", sn)
 		fmt.Fprintf(&b, "set firewall.%s.name=%s\n", sn, uciQuote(f.Name))
 		if f.Family != "any" {
@@ -1063,6 +1238,11 @@ func (s *server) handleFWApply(w http.ResponseWriter, r *http.Request) {
 		}
 		if f.Weekdays != "" {
 			fmt.Fprintf(&b, "set firewall.%s.weekdays=%s\n", sn, uciQuote(f.Weekdays))
+		}
+		// dnevnik: fw4 tada pred akcijom zapiše paket u kernel log (logread),
+		// odakle ga čita handleFWLog. Bez ovoga se odbačeni promet ne vidi.
+		if f.Log {
+			fmt.Fprintf(&b, "set firewall.%s.log=1\n", sn)
 		}
 		fmt.Fprintf(&b, "set firewall.%s.target=%s\n", sn, f.Target)
 	}

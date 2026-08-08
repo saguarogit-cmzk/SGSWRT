@@ -41,6 +41,8 @@ func openDB(path string) (*sql.DB, error) {
 	db.Exec(`ALTER TABLE fw_rules ADD COLUMN start_time TEXT`)
 	db.Exec(`ALTER TABLE fw_rules ADD COLUMN stop_time TEXT`)
 	db.Exec(`ALTER TABLE fw_rules ADD COLUMN weekdays TEXT`)
+	db.Exec(`ALTER TABLE fw_rules ADD COLUMN log INTEGER NOT NULL DEFAULT 0`)
+	db.Exec(`ALTER TABLE fw_rules ADD COLUMN pos INTEGER NOT NULL DEFAULT 0`)
 	db.Exec(`ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0`)
 	// uloge (E1): postojeći jedini korisnik ostaje admin, što je i bio
 	db.Exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`)

@@ -544,7 +544,7 @@
         <table>
           <thead><tr>
             <th>Naziv</th><th>Proto</th><th>Izvor</th><th>Odredište</th>
-            <th>Akcija</th><th>Kada</th><th>Aktivan</th><th></th>
+            <th>Akcija</th><th>Kada</th><th>Pogodaka</th><th>Aktivan</th><th></th>
           </tr></thead>
           <tbody id="rl-rows"></tbody>
         </table>
@@ -554,6 +554,28 @@
       <p class="hint">Primjena upravlja samo Saguaro zapisima (sag_pf_*, sag_rl_*) —
         postojeća OpenWrt pravila i zone se ne diraju.</p>
     </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Dnevnik firewalla</h2>
+        <span class="head-note" id="fwlog-note">—</span>
+        <button id="fwlog-refresh" class="ghost">Osvježi</button>
+      </div>
+      <p class="hint">Zadnji zabilježeni paketi: zadana odbacivanja fw4 i pravila
+        kojima je uključen <b>Zapisuj u dnevnik</b>. Ovdje se vidi <i>zašto</i>
+        nešto ne prolazi — izvor, odredište i port odbačenog prometa. Uključi
+        dnevnik na pravilu koje istražuješ, primijeni, pa osvježi.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Vrijeme</th><th>Ulaz</th><th>Izlaz</th><th>Izvor</th>
+            <th>Odredište</th><th>Proto</th><th>Port</th>
+          </tr></thead>
+          <tbody id="fwlog-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <h2>Aliasi — imenovane grupe adresa</h2>
@@ -3049,11 +3071,14 @@
         <label class="wide">Dani u tjednu (ništa označeno = svi dani)
           <span id="rl-days" class="daypick"></span></label>
         <label class="wide">Napomene<textarea name="notes" rows="2"></textarea></label>
+        <label class="check"><input type="checkbox" name="log">
+          Zapisuj u dnevnik — bilježi pakete koje ovo pravilo uhvati (Dnevnik firewalla)</label>
         <label class="check"><input type="checkbox" name="enabled" checked>
           Aktivno — uključi u primjenu</label>
       </div>
       <p class="hint">U poljima adresa mogu se koristiti i aliasi
-        (npr. <code>@serveri</code>).</p>
+        (npr. <code>@serveri</code>). Broj pogodaka po pravilu i zabilježeni
+        promet vide se u tablici i u kartici <b>Dnevnik firewalla</b> ispod.</p>
       <div class="form-actions">
         <button type="button" class="ghost" id="rl-cancel">Odustani</button>
         <button type="submit" class="primary">Spremi</button>

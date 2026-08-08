@@ -632,6 +632,7 @@ async function loadFirewall() {
     api("/firewall/snat"),
   ]);
   renderSnat(sn);
+  loadFWLog().catch(() => setNote("fwlog-note", "dnevnik nedostupan"));
 
   const ab = $("al-rows");
   ab.replaceChildren();
@@ -749,7 +750,7 @@ async function loadFirewall() {
 
   const rb = $("rl-rows");
   rb.replaceChildren();
-  for (const f of rl.rules) {
+  rl.rules.forEach((f, idx) => {
     const tr = document.createElement("tr");
     for (const v of [f.name, f.proto]) {
       const td = document.createElement("td");
@@ -768,12 +769,27 @@ async function loadFirewall() {
     tdW.textContent = scheduleText(f);
     if (f.start_time || f.weekdays) tdW.className = "sched";
     tr.append(tdW);
+    // pogodaka: broj paketa koje je pravilo uhvatilo (nft counter); uz to
+    // znak dnevnika ako je uključen zapis odbačenog prometa
+    const tdH = document.createElement("td");
+    tdH.textContent = (f.hits ? f.hits.toLocaleString("hr-HR") : "0") +
+      (f.log ? " 📝" : "");
+    tdH.title = f.bytes ? fmtBytes(f.bytes) : "";
+    tr.append(tdH);
     const tdE = document.createElement("td");
     tdE.append(tick(!!f.enabled, null));
     tr.append(tdE);
     const tdAct = document.createElement("td");
     tdAct.className = "row-actions";
-    tdAct.append(
+    const move = async (dir) => {
+      await api("/firewall/rules/" + f.uuid + "/move", "POST", { dir }).catch(alertErr);
+      loadFirewall().catch(alertErr);
+    };
+    const up = btnSm("Gore", false, () => move("up"));
+    up.disabled = idx === 0;
+    const down = btnSm("Dolje", false, () => move("down"));
+    down.disabled = idx === rl.rules.length - 1;
+    tdAct.append(up, down,
       btnSm("Uredi", false, () => openRlDialog(f)),
       btnSm("Obriši", true, async () => {
         if (!confirm(`Obrisati pravilo "${f.name}"?`)) return;
@@ -782,8 +798,28 @@ async function loadFirewall() {
       }));
     tr.append(tdAct);
     rb.append(tr);
-  }
+  });
 }
+
+async function loadFWLog() {
+  const x = await api("/firewall/log");
+  const tb = $("fwlog-rows");
+  tb.replaceChildren();
+  for (const e of x.entries || []) {
+    const tr = document.createElement("tr");
+    for (const v of [e.time || "—", e.in || "—", e.out || "—", e.src, e.dst,
+      e.proto || "—", e.dport || "—"]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.append(td);
+    }
+    tb.append(tr);
+  }
+  setNote("fwlog-note", (x.entries || []).length
+    ? (x.entries.length) + " zapisa (najnoviji gore)"
+    : "nema zapisa — uključi dnevnik na pravilu pa osvježi");
+}
+$("fwlog-refresh").addEventListener("click", () => loadFWLog().catch(alertErr));
 
 /* ---------- vremensko ograničenje pravila ---------- */
 
@@ -3712,6 +3748,7 @@ $("rl-form").addEventListener("submit", async (ev) => {
     "dest_ip", "dest_port", "target", "start_time", "stop_time",
     "notes"]) body[n] = f.elements[n].value.trim();
   body.weekdays = pickedDays();
+  body.log = f.elements.log.checked;
   body.enabled = f.elements.enabled.checked;
   try {
     if (editRlUUID) await api("/firewall/rules/" + editRlUUID, "PUT", body);

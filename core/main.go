@@ -247,6 +247,8 @@ func main() {
 	mux.Handle("POST /api/v1/dns/split", s.auth(s.handleSplitCreate))
 	mux.Handle("PUT /api/v1/dns/split/{uuid}", s.auth(s.handleSplitUpdate))
 	mux.Handle("DELETE /api/v1/dns/split/{uuid}", s.auth(s.handleSplitDelete))
+	mux.Handle("GET /api/v1/firewall/log", s.auth(s.handleFWLog))
+	mux.Handle("POST /api/v1/firewall/rules/{uuid}/move", s.auth(s.handleFWRuleMove))
 	mux.Handle("GET /api/v1/protection", s.auth(s.handleProtectionGet))
 	mux.Handle("POST /api/v1/protection/banip", s.auth(s.handleBanipSet))
 	mux.Handle("POST /api/v1/protection/adblock", s.auth(s.handleAdblockSet))
