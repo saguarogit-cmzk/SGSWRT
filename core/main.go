@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.49.0"
+const version = "0.50.0"
 
 type server struct {
 	tokenMu       sync.RWMutex
@@ -323,6 +323,10 @@ func main() {
 	mux.Handle("GET /api/v1/dnsforce", s.auth(s.handleForcedDNSGet))
 	mux.Handle("POST /api/v1/dnsforce", s.auth(s.handleForcedDNSSet))
 	mux.Handle("GET /api/v1/connections", s.auth(s.handleConnections))
+	mux.Handle("POST /api/v1/diag/ping", s.auth(s.handleDiagPing))
+	mux.Handle("POST /api/v1/diag/traceroute", s.auth(s.handleDiagTraceroute))
+	mux.Handle("POST /api/v1/diag/lookup", s.auth(s.handleDiagLookup))
+	mux.Handle("GET /api/v1/diag/neighbors", s.auth(s.handleDiagNeighbors))
 	mux.Handle("GET /api/v1/capture", s.auth(s.handleCaptureStatus))
 	mux.Handle("POST /api/v1/capture/install", s.auth(s.handleCaptureInstall))
 	mux.Handle("POST /api/v1/capture/start", s.auth(s.handleCaptureStart))

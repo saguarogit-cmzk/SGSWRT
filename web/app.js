@@ -2829,7 +2829,7 @@ const MODULE_KEYS = {
   monitorx: "nadzor praćenje ping promet potrošnja",
   alerts: "upozorenja obavijesti e-mail mail dojava",
   audit: "promjene tko je mijenjao dnevnik izmjena",
-  diag: "dijagnostika veze conntrack tko trosi snimanje prometa pcap tcpdump wireshark",
+  diag: "dijagnostika veze conntrack tko trosi snimanje prometa pcap tcpdump wireshark ping traceroute nslookup lookup dns arp ndp susjedi mrezni alati",
   ups: "ups neprekidno napajanje baterija struja nestanak gašenje nut autonomija",
   network: "mreža mreže lan vlan podmreža segment adresa sučelje glavna",
   wan: "internet wan veza pristup operater ddns dinamički dns",
@@ -5570,6 +5570,7 @@ function renderConnRows() {
 
 async function loadDiag() {
   loadCapture().catch(() => setPill($("cp-state"), "off", "nedostupno"));
+  loadNeighbors().catch(() => setNote("nb-note", "nedostupno"));
   const x = await api("/connections");
   diagConns = x.connections || [];
 
@@ -5611,6 +5612,49 @@ async function loadDiag() {
 }
 
 $("cn-refresh").addEventListener("click", () => loadDiag().catch(alertErr));
+
+/* ---------- mrežni alati ---------- */
+
+async function runDiagTool(path, body, label) {
+  const out = $("dt-out");
+  out.classList.remove("hidden");
+  out.textContent = label + " " + ($("dt-host").value.trim()) + " …";
+  for (const b of ["dt-ping", "dt-trace", "dt-lookup"]) $(b).disabled = true;
+  try {
+    const r = await api(path, "POST", body);
+    out.textContent = r.output || "(bez izlaza)";
+  } catch (e) {
+    out.textContent = "Greška: " + (e.message || e);
+  } finally {
+    for (const b of ["dt-ping", "dt-trace", "dt-lookup"]) $(b).disabled = false;
+  }
+}
+$("dt-ping").addEventListener("click", () =>
+  runDiagTool("/diag/ping", { host: $("dt-host").value.trim() }, "Ping"));
+$("dt-trace").addEventListener("click", () =>
+  runDiagTool("/diag/traceroute", { host: $("dt-host").value.trim() }, "Traceroute do"));
+$("dt-lookup").addEventListener("click", () =>
+  runDiagTool("/diag/lookup", { name: $("dt-host").value.trim() }, "DNS lookup za"));
+$("dt-host").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); $("dt-ping").click(); }
+});
+
+async function loadNeighbors() {
+  const x = await api("/diag/neighbors");
+  const tb = $("nb-rows");
+  tb.replaceChildren();
+  for (const n of x.neighbors || []) {
+    const tr = document.createElement("tr");
+    for (const v of [n.ip, n.name || "—", n.mac, n.dev, n.state || "—"]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.append(td);
+    }
+    tb.append(tr);
+  }
+  setNote("nb-note", (x.neighbors || []).length + " susjeda");
+}
+$("nb-refresh").addEventListener("click", () => loadNeighbors().catch(alertErr));
 $("cn-filter").addEventListener("input", renderConnRows);
 
 async function loadCapture() {

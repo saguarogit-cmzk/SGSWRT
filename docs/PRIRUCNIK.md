@@ -952,7 +952,21 @@ Odredištu se vraća i skripta prvog dizanja, pa pri prvom pokretanju s diska
 sam napravi **data particiju** od ostatka diska. Zapis o data particiji medija
 s kojeg je kopirano se briše — odnosi se na taj medij, ne na novi disk.
 
-## Diagnostics (Status) — aktivne veze i snimanje prometa
+## Diagnostics (Status) — mrežni alati, aktivne veze i snimanje prometa
+
+### Mrežni alati
+
+Provjere koje su se prije radile preko SSH-a, sada iz sučelja:
+
+- **Ping** — dostupnost i vrijeme odziva (4 paketa).
+- **Traceroute** — put do odredišta, skok po skok (do 20 skokova).
+- **DNS lookup** — u što se ime razlučuje (nslookup).
+- **Susjedi (ARP / NDP)** — tablica uređaja koje jezgra vidi na izravno
+  spojenim mrežama: adresa, MAC, sučelje i stanje; ime se pridruži iz DHCP
+  leaseova. Za IPv4 je to ARP, za IPv6 NDP.
+
+Upisuje se adresa ili ime hosta; unos se provjerava (samo valjana adresa/ime),
+a alati se pokreću sa zadanim vremenskim ograničenjem da sučelje ne visi.
 
 ### Tko troši vezu
 
