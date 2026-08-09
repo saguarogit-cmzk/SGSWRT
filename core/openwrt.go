@@ -571,7 +571,7 @@ func (s *server) handleOpenWrtFlash(w http.ResponseWriter, r *http.Request) {
 	// popis paketa preživi nadogradnju (etc je u keep listi)
 	_ = os.WriteFile(s.owPackagesFile(),
 		[]byte(strings.Join(worldPackages(), "\n")+"\n"), 0o644)
-	s.alert("reboot", "warn", "Nadogradnja OpenWrt-a na "+m.Version+
+	s.alert("reboot", "warning", "Nadogradnja OpenWrt-a na "+m.Version+
 		" — uređaj se ponovno pokreće (backup "+name+")")
 
 	// sysupgrade ubija procese, uključujući ovaj — zato ide odvojeno od HTTP

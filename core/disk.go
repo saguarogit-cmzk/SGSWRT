@@ -270,13 +270,13 @@ func (s *server) checkRootAfterUpgrade() {
 	}
 	switch {
 	case st.Shrunk:
-		s.alert("resources", "warn", fmt.Sprintf(
+		s.alert("resources", "warning", fmt.Sprintf(
 			"Nakon nadogradnje root particija nije onolika koliko je traženo: "+
 				"%d MB umjesto %d MB (slobodno %d MB). Kod sljedeće nadogradnje u modulu "+
 				"Updates provjeri veličinu root particije (preporuka %d MB).",
 			int(st.PartBytes>>20), int(st.ShrunkBefore>>20), int(st.FSFree>>20), st.RecommendMB))
 	case st.State == "premalo":
-		s.alert("resources", "warn", "Root particija je gotovo puna: "+st.Note)
+		s.alert("resources", "warning", "Root particija je gotovo puna: "+st.Note)
 	}
 	// zapis se troši jednom — poruka se ne ponavlja svaki restart
 	if st.Shrunk {
