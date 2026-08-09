@@ -3,6 +3,8 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,41 @@ import (
 	"strings"
 	"time"
 )
+
+// verifyStagedSHA256 preuzme .sha256 uz izdanje i usporedi ga s otiskom
+// preuzetog paketa. Greška znači da se paket ne poklapa (oštećen ili podmetnut).
+func verifyStagedSHA256(client *http.Client, shaURL, path string) error {
+	resp, err := client.Get(shaURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if err != nil {
+		return err
+	}
+	want := strings.ToLower(strings.TrimSpace(string(raw)))
+	if i := strings.IndexAny(want, " \t"); i > 0 { // format "<hex>  ime"
+		want = want[:i]
+	}
+	if len(want) != 64 {
+		return fmt.Errorf("neispravan zapis otiska")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if got != want {
+		return fmt.Errorf("otisak se ne poklapa (očekivano %s, dobiveno %s)", want, got)
+	}
+	return nil
+}
 
 // Update modul: nadogradnja saguaro-core + web iz release paketa.
 // Dva izvora: GitHub Releases (kad postoje) ili ručno učitan paket kroz GUI.
@@ -233,11 +270,13 @@ func (s *server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "još nema objavljenih izdanja")
 			return
 		}
-		url := ""
+		url, shaURL := "", ""
 		for _, a := range rel.Assets {
 			if isUpdateAsset(a.Name) {
 				url = a.URL
-				break
+			}
+			if strings.Contains(a.Name, "linux-amd64") && strings.HasSuffix(a.Name, ".tar.gz.sha256") {
+				shaURL = a.URL
 			}
 		}
 		if url == "" {
@@ -262,6 +301,16 @@ func (s *server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, "preuzimanje: "+err.Error())
 			return
+		}
+		// provjera otiska: izdanje uz paket objavljuje .sha256 — ako postoji,
+		// preuzeti paket mora odgovarati, inače se odbija (zaštita od
+		// oštećenog ili podmetnutog paketa)
+		if shaURL != "" {
+			if err := verifyStagedSHA256(client, shaURL, s.stagedUpdatePath()); err != nil {
+				os.Remove(s.stagedUpdatePath())
+				writeErr(w, http.StatusBadGateway, "provjera otiska: "+err.Error())
+				return
+			}
 		}
 	}
 

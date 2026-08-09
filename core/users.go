@@ -67,6 +67,22 @@ func adminOnlyPath(path string) bool {
 	return false
 }
 
+// secretReadPath nabraja GET putanje koje vraćaju tajne ili osjetljiv sadržaj
+// (VPN konfiguracije s privatnim ključem, backup arhiva s ključevima i
+// lozinkama, snimke prometa). Uloga „samo pregled" ih ne smije čitati — inače
+// bi račun dan vanjskom nadzoru „samo za grafove" povukao radni VPN pristup.
+func secretReadPath(path string) bool {
+	switch {
+	case strings.HasSuffix(path, "/config"): // wireguard/wgsite/openvpn/proxy
+		return true
+	case strings.HasPrefix(path, "/api/v1/backup/download/"):
+		return true
+	case strings.HasPrefix(path, "/api/v1/capture/files/"):
+		return true
+	}
+	return false
+}
+
 // alwaysAllowedPath su radnje nad vlastitim računom — dopuštene su svakoj
 // ulozi, inače se korisnik ne bi mogao ni odjaviti ni promijeniti lozinku.
 func alwaysAllowedPath(path string) bool {
@@ -94,6 +110,10 @@ func permitted(role, method, path string) (bool, string) {
 		return true, ""
 	case roleViewer:
 		if method == http.MethodGet {
+			if secretReadPath(path) {
+				return false, "ovaj račun (samo pregled) ne smije preuzimati " +
+					"VPN konfiguracije, backup ni snimke prometa"
+			}
 			return true, ""
 		}
 		return false, "ovaj račun ima pravo samo gledati"

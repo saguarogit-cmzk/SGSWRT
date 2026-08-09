@@ -454,11 +454,12 @@ func (s *server) handleFWRuleList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, f)
 	}
-	// brojači pogodaka iz žive nftables tablice (fw4 svakom pravilu daje
-	// counter i komentar "!fw4: <ime>"); mapira se po imenu pravila
+	// brojači pogodaka iz žive nftables tablice; vežu se po oznaci #<uuid6>
+	// koju fw4 ima u komentaru pravila (pouzdano i kad dva pravila dijele ime)
 	counters := fw4Counters(r.Context())
 	for i := range out {
-		if c, ok := counters[out[i].Name]; ok {
+		short := strings.ReplaceAll(out[i].UUID, "-", "")[:6]
+		if c, ok := counters[short]; ok {
 			out[i].Hits = c.packets
 			out[i].Bytes = c.bytes
 		}
@@ -468,10 +469,11 @@ func (s *server) handleFWRuleList(w http.ResponseWriter, r *http.Request) {
 
 type nftCounter struct{ packets, bytes int64 }
 
+var reRuleTag = regexp.MustCompile(`#([0-9a-f]{6})$`)
+
 // fw4Counters čita broj pogodaka i bajtova po pravilu iz žive nftables tablice.
-// fw4 svako pravilo označi komentarom "!fw4: <ime pravila>" i doda counter, pa
-// se brojači vežu uz Saguaro pravila preko imena. Isto ime na više pravila se
-// zbraja.
+// Saguaro pravila u komentaru nose "…#<uuid6>" (vidi handleFWApply), pa se
+// brojači vežu po toj oznaci — pouzdano i kad dva pravila imaju isto ime.
 func fw4Counters(ctx context.Context) map[string]nftCounter {
 	res := map[string]nftCounter{}
 	out, err := exec.CommandContext(ctx, "nft", "-j", "list", "table", "inet", "fw4").Output()
@@ -496,16 +498,20 @@ func fw4Counters(ctx context.Context) map[string]nftCounter {
 	}
 	for _, item := range doc.Nftables {
 		r := item.Rule
-		if r == nil || !strings.HasPrefix(r.Comment, "!fw4: ") {
+		if r == nil {
 			continue
 		}
-		name := strings.TrimPrefix(r.Comment, "!fw4: ")
+		m := reRuleTag.FindStringSubmatch(r.Comment)
+		if m == nil {
+			continue // nije Saguaro pravilo (nema #<uuid6> oznake)
+		}
+		short := m[1]
 		for _, e := range r.Expr {
 			if e.Counter != nil {
-				c := res[name]
+				c := res[short]
 				c.packets += e.Counter.Packets
 				c.bytes += e.Counter.Bytes
-				res[name] = c
+				res[short] = c
 			}
 		}
 	}
@@ -1196,9 +1202,13 @@ func (s *server) handleFWApply(w http.ResponseWriter, r *http.Request) {
 		// redni broj u nazivu sekcije čuva redoslijed: fw4 pravila unutar
 		// istog lanca (ista izvor→odredište zona) primjenjuje redom kojim su
 		// zapisana, a uci ih drži poredane po imenu sekcije
-		sn := fmt.Sprintf("%s%03d_%s", rlPrefix, i, strings.ReplaceAll(f.UUID, "-", "")[:6])
+		short := strings.ReplaceAll(f.UUID, "-", "")[:6]
+		sn := fmt.Sprintf("%s%03d_%s", rlPrefix, i, short)
 		fmt.Fprintf(&b, "set firewall.%s=rule\n", sn)
-		fmt.Fprintf(&b, "set firewall.%s.name=%s\n", sn, uciQuote(f.Name))
+		// uz ime dodajemo kratku oznaku #<uuid6> — fw4 to stavi u komentar
+		// nftables pravila, pa se brojači pogodaka vežu POUZDANO po pravilu i
+		// kad dva pravila dijele isto ime (mapiranje samo po imenu bi promašilo)
+		fmt.Fprintf(&b, "set firewall.%s.name=%s\n", sn, uciQuote(f.Name+" #"+short))
 		if f.Family != "any" {
 			fmt.Fprintf(&b, "set firewall.%s.family=%s\n", sn, f.Family)
 		}

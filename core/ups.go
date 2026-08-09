@@ -263,14 +263,17 @@ func (s *server) handleUPSGet(w http.ResponseWriter, r *http.Request) {
 		out["low_pct"] = v
 	}
 	// dijeljenje na mreži (NUT poslužitelj): podaci za druga računala. Lozinka
-	// se OVDJE prikazuje jer je klijenti trebaju unijeti (kao SSH ključ backupa)
+	// se OVDJE prikazuje jer je klijenti trebaju unijeti (kao SSH ključ backupa),
+	// ali NE ulozi „samo pregled" — ona vidi da se dijeli, bez tajne.
 	share := s.getSetting("ups_share", "0") == "1"
 	out["share"] = share
 	if share {
 		out["share_host"] = uciGet(ctx, "network.lan.ipaddr")
 		out["share_user"] = uciGet(ctx, "nut_server.sag_client.username")
-		out["share_pass"] = uciGet(ctx, "nut_server.sag_client.password")
 		out["share_ups"] = upsName
+		if _, _, role := s.sessionUserRole(bearerToken(r)); role != roleViewer {
+			out["share_pass"] = uciGet(ctx, "nut_server.sag_client.password")
+		}
 	}
 	// udaljeni NUT: host, ime UPS-a i korisnik (lozinka se NE vraća)
 	out["remote_host"] = uciGet(ctx, "nut_monitor.sag_remote.hostname")

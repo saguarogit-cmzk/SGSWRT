@@ -40,6 +40,19 @@ func TestPermitted(t *testing.T) {
 		{roleViewer, http.MethodPut, "/api/v1/routes/x", false},
 		{roleViewer, http.MethodDelete, "/api/v1/dhcp/leases/x", false},
 		{roleViewer, http.MethodGet, "/api/v1/users", false},
+		// …ali ne smije preuzeti tajne (VPN konfiguracije, backup, snimke)
+		{roleViewer, http.MethodGet, "/api/v1/wireguard/peers/x/config", false},
+		{roleViewer, http.MethodGet, "/api/v1/wgsite/sites/x/config", false},
+		{roleViewer, http.MethodGet, "/api/v1/openvpn/clients/x/config", false},
+		{roleViewer, http.MethodGet, "/api/v1/backup/download/arh.tar.gz", false},
+		{roleViewer, http.MethodGet, "/api/v1/capture/files/snimka.pcap", false},
+		// operater i admin te tajne smiju
+		{roleOperator, http.MethodGet, "/api/v1/wireguard/peers/x/config", true},
+		{roleAdmin, http.MethodGet, "/api/v1/backup/download/arh.tar.gz", true},
+		// update/upload i apply su sada samo za administratora
+		{roleOperator, http.MethodPost, "/api/v1/update/upload", false},
+		{roleOperator, http.MethodPost, "/api/v1/update/apply", false},
+		{roleOperator, http.MethodPost, "/api/v1/openwrt/upload", false},
 
 		// vlastiti račun i odjava rade uvijek — inače bi se korisnik
 		// zaključao van
