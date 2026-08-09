@@ -5950,11 +5950,34 @@ async function loadUps() {
   $("ups-conn").value = x.conn === "remote" ? "remote" : "usb";
   if (x.driver) $("ups-driver").value = x.driver;
   $("ups-low").value = x.low_pct || "";
+  $("ups-share").checked = !!x.share;
   $("ups-rhost").value = x.remote_host || "";
   $("ups-rups").value = x.remote_ups || "";
   $("ups-ruser").value = x.remote_user || "";
   $("ups-rpass").value = "";
   upsToggleConn();
+
+  // podaci za klijente kad je dijeljenje uključeno
+  const sinfo = $("ups-share-info");
+  if (x.share && x.share_host) {
+    const kv = $("ups-share-kv");
+    kv.replaceChildren();
+    for (const [k, v] of [
+      ["Poslužitelj (host)", x.share_host],
+      ["Ime UPS-a", (x.share_ups || "sag_ups") + "@" + x.share_host],
+      ["Korisnik", x.share_user || "nutklijent"],
+      ["Lozinka", x.share_pass || "—"],
+      ["Port", "3493 (TCP)"],
+    ]) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      dd.style.wordBreak = "break-all";
+      kv.append(dt, dd);
+    }
+    sinfo.classList.remove("hidden");
+  } else {
+    sinfo.classList.add("hidden");
+  }
 
   const u = x.ups;
   if (!x.enabled) {
@@ -6025,6 +6048,7 @@ $("ups-save").addEventListener("click", async () => {
       conn: $("ups-conn").value,
       driver: $("ups-driver").value,
       low_pct: parseInt($("ups-low").value, 10) || 0,
+      share: $("ups-share").checked,
       remote_host: $("ups-rhost").value.trim(),
       remote_ups: $("ups-rups").value.trim(),
       remote_user: $("ups-ruser").value.trim(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -83,6 +84,28 @@ func upsInstalled() bool {
 
 // upsConn vraća tip veze: "usb" (lokalni UPS na USB-u) ili "remote" (UPS na
 // drugom NUT poslužitelju kojeg samo pratimo). Zadano usb.
+// applyUPSFirewall otvara ili zatvara port 3493/tcp (NUT) iz LAN zone prema
+// uređaju, ovisno o tome dijeli li se UPS na mreži. Vlastito sag_ pravilo, kao
+// kod WireGuarda — tuđa pravila se ne diraju (D-011).
+func (s *server) applyUPSFirewall(ctx context.Context, open bool) error {
+	var b strings.Builder
+	// uvijek prvo makni staro pravilo, pa dodaj ako treba (idempotentno)
+	b.WriteString("delete firewall.sag_ups_rule\n")
+	if open {
+		b.WriteString("set firewall.sag_ups_rule=rule\n")
+		b.WriteString("set firewall.sag_ups_rule.name=Saguaro-NUT\n")
+		b.WriteString("set firewall.sag_ups_rule.src=lan\n")
+		b.WriteString("set firewall.sag_ups_rule.proto=tcp\n")
+		b.WriteString("set firewall.sag_ups_rule.dest_port=3493\n")
+		b.WriteString("set firewall.sag_ups_rule.target=ACCEPT\n")
+	}
+	b.WriteString("commit firewall\n")
+	if err := uciBatch(ctx, b.String()); err != nil {
+		return err
+	}
+	return serviceReload(ctx, "firewall", "reload")
+}
+
 func (s *server) upsConn() string {
 	c := s.getSetting("ups_conn", "usb")
 	if c != "remote" {
@@ -233,6 +256,16 @@ func (s *server) handleUPSGet(w http.ResponseWriter, r *http.Request) {
 	if v := uciGet(ctx, "nut_server.override_battery_charge_low.value"); v != "" {
 		out["low_pct"] = v
 	}
+	// dijeljenje na mreži (NUT poslužitelj): podaci za druga računala. Lozinka
+	// se OVDJE prikazuje jer je klijenti trebaju unijeti (kao SSH ključ backupa)
+	share := s.getSetting("ups_share", "0") == "1"
+	out["share"] = share
+	if share {
+		out["share_host"] = uciGet(ctx, "network.lan.ipaddr")
+		out["share_user"] = uciGet(ctx, "nut_server.sag_client.username")
+		out["share_pass"] = uciGet(ctx, "nut_server.sag_client.password")
+		out["share_ups"] = upsName
+	}
 	// udaljeni NUT: host, ime UPS-a i korisnik (lozinka se NE vraća)
 	out["remote_host"] = uciGet(ctx, "nut_monitor.sag_remote.hostname")
 	out["remote_ups"] = uciGet(ctx, "nut_monitor.sag_remote.upsname")
@@ -301,6 +334,7 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		Conn    string `json:"conn"` // usb | remote
 		Driver  string `json:"driver"`
 		LowPct  int    `json:"low_pct"` // 0 = prepusti UPS-u tvornički prag
+		Share   bool   `json:"share"`   // USB: dijeli UPS na mreži (NUT poslužitelj)
 		// udaljeni NUT
 		RemoteHost string `json:"remote_host"`
 		RemoteUps  string `json:"remote_ups"`
@@ -380,9 +414,33 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		b.WriteString("set nut_server.sag_user.username=saguaro\n")
 		b.WriteString("set nut_server.sag_user.password=" + pw + "\n")
 		b.WriteString("set nut_server.sag_user.upsmon=master\n")
+		// lokalno slušanje uvijek (za vlastiti upsmon)
 		b.WriteString("set nut_server.sag_listen=listen_address\n")
 		b.WriteString("set nut_server.sag_listen.address=127.0.0.1\n")
 		b.WriteString("set nut_server.sag_listen.port=3493\n")
+		// dijeljenje na mreži: dodatno slušanje na LAN adresi + klijentski
+		// korisnik (secondary) da druga računala na istom UPS-u dobiju gašenje.
+		// Klijent NE smije naredbe — samo prati i gasi sebe (upsmon=slave).
+		lanIP := uciGet(ctx, "network.lan.ipaddr")
+		if in.Share && *in.Enabled && lanIP != "" {
+			cpw := uciGet(ctx, "nut_server.sag_client.password")
+			if cpw == "" {
+				raw := make([]byte, 12)
+				if _, err := rand.Read(raw); err == nil {
+					cpw = hex.EncodeToString(raw)
+				}
+			}
+			b.WriteString("set nut_server.sag_listen_net=listen_address\n")
+			b.WriteString("set nut_server.sag_listen_net.address=" + lanIP + "\n")
+			b.WriteString("set nut_server.sag_listen_net.port=3493\n")
+			b.WriteString("set nut_server.sag_client=user\n")
+			b.WriteString("set nut_server.sag_client.username=nutklijent\n")
+			b.WriteString("set nut_server.sag_client.password=" + cpw + "\n")
+			b.WriteString("set nut_server.sag_client.upsmon=slave\n")
+		} else {
+			b.WriteString("delete nut_server.sag_listen_net\n")
+			b.WriteString("delete nut_server.sag_client\n")
+		}
 		b.WriteString("commit nut_server\n")
 		// upsmon kao MASTER lokalnog UPS-a — on gasi uređaj kad je baterija prazna
 		b.WriteString("set nut_monitor.sag_master=master\n")
@@ -432,10 +490,17 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Saguaro-razina: pamti tip veze i je li uključeno (izvor istine za
-	// upsEnabled/upsConn/upsTarget)
+	// Saguaro-razina: pamti tip veze, je li uključeno i dijeli li se na mreži
+	// (izvor istine za upsEnabled/upsConn/upsTarget/upsShare)
 	s.setSetting("ups_conn", in.Conn)
 	s.setSetting("ups_enabled", boolSetting(*in.Enabled))
+	sharing := in.Conn == "usb" && *in.Enabled && in.Share
+	s.setSetting("ups_share", boolSetting(sharing))
+
+	// firewall: port 3493/tcp iz LAN-a prema uređaju samo dok se UPS dijeli
+	if err := s.applyUPSFirewall(ctx, sharing); err != nil {
+		log.Printf("UPS firewall pravilo: %v", err)
+	}
 
 	// USB tip vozi lokalni upsd (nut-server); remote tip ga ne treba
 	if in.Conn == "usb" {

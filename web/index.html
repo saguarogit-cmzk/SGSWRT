@@ -2050,8 +2050,10 @@
         NUT paketi se instaliraju jednim klikom. Kod USB veze driver
         <code>usbhid-ups</code> pokriva većinu novijih UPS-eva,
         <code>nutdrv_qx</code> starije. Kod udaljene veze Saguaro samo prati
-        tuđi UPS i gasi <b>sebe</b> (nikad tuđi UPS). Sučelje pokazuje
-        napajanje, bateriju, autonomiju i opterećenje; nestanak struje,
+        tuđi UPS i gasi <b>sebe</b> (nikad tuđi UPS). Kod USB veze može i
+        <b>dijeliti UPS na mreži</b> — druga računala na istom UPS-u spoje se na
+        Saguaro i dobiju uredno gašenje (port 3493 samo prema LAN-u). Sučelje
+        pokazuje napajanje, bateriju, autonomiju i opterećenje; nestanak struje,
         povratak, slabu bateriju i gubitak veze javlja e-mailom (vrsta „UPS").
         Ako se UPS ili udaljeni NUT ne javlja, pošteno to piše.
       </div></details>
@@ -2641,14 +2643,26 @@
               <option value="remote">Udaljeni NUT — UPS na drugom poslužitelju</option>
             </select></label>
         </div>
-        <div class="form-grid wide-4" id="ups-usb-fields">
-          <label>Driver
-            <select id="ups-driver">
-              <option value="usbhid-ups">usbhid-ups — USB, većina novijih (APC, Eaton, CyberPower…)</option>
-              <option value="nutdrv_qx">nutdrv_qx — stariji i jeftiniji (Megatec/Q1)</option>
-            </select></label>
-          <label>Prag baterije za gašenje (%)
-            <input id="ups-low" type="number" min="0" max="90" placeholder="tvornički prag UPS-a"></label>
+        <div id="ups-usb-fields">
+          <div class="form-grid wide-4">
+            <label>Driver
+              <select id="ups-driver">
+                <option value="usbhid-ups">usbhid-ups — USB, većina novijih (APC, Eaton, CyberPower…)</option>
+                <option value="nutdrv_qx">nutdrv_qx — stariji i jeftiniji (Megatec/Q1)</option>
+              </select></label>
+            <label>Prag baterije za gašenje (%)
+              <input id="ups-low" type="number" min="0" max="90" placeholder="tvornički prag UPS-a"></label>
+            <label class="check"><input id="ups-share" type="checkbox"> Dijeli UPS na mreži (NUT poslužitelj)</label>
+          </div>
+          <p class="hint">Uključi ako su i druga računala/serveri na istom UPS-u:
+            oni se onda spoje na ovaj uređaj i dobiju uredno gašenje. Otvara se
+            port 3493 samo prema LAN-u. Podaci za prijavu klijenata pojave se
+            ispod nakon spremanja.</p>
+          <div class="hidden" id="ups-share-info"
+               style="background:var(--green-l);border:1px solid #6aa62a55;border-radius:8px;padding:10px 12px;margin:6px 0">
+            <b>Postavke za druga računala (NUT klijent):</b>
+            <dl class="kv" id="ups-share-kv" style="margin:6px 0 0"></dl>
+          </div>
         </div>
         <div class="form-grid wide-4 hidden" id="ups-remote-fields">
           <label>Poslužitelj (IP ili ime)<input id="ups-rhost" placeholder="npr. 192.168.50.20"></label>

@@ -1065,6 +1065,13 @@ servis ne radi. Dvije vrste veze:
 - **Prag gašenja** je tvornički prag samog UPS-a; postotak se upisuje samo
   ako se gašenje želi ranije (driveru se doda
   `override.battery.charge.low`).
+- **Dijeli UPS na mreži (NUT poslužitelj)** — samo kod USB veze: ako su i druga
+  računala/serveri na istom UPS-u, uključi ovo pa se ona spoje na Saguaro i
+  dobiju uredno gašenje. Saguaro tada sluša i na LAN adresi (port 3493, otvoren
+  **samo prema LAN-u**) i stvara zaseban klijentski račun (`nutklijent`,
+  *secondary* — smije samo pratiti i gasiti sebe, ne izdavati naredbe). Podaci
+  za druga računala (host, ime UPS-a `sag_ups@<ip>`, korisnik i lozinka) pojave
+  se u sučelju nakon spremanja — upišeš ih u NUT klijent na tim računalima.
 - Ako UPS nije spojen, driver ga ne prepozna ili udaljeni NUT ne odgovara,
   sučelje pošteno piše „UPS/udaljeni NUT se ne javlja" — ništa se ne izmišlja.
 
