@@ -5947,8 +5947,14 @@ async function loadUps() {
     return;
   }
   $("ups-enabled").checked = !!x.enabled;
+  $("ups-conn").value = x.conn === "remote" ? "remote" : "usb";
   if (x.driver) $("ups-driver").value = x.driver;
   $("ups-low").value = x.low_pct || "";
+  $("ups-rhost").value = x.remote_host || "";
+  $("ups-rups").value = x.remote_ups || "";
+  $("ups-ruser").value = x.remote_user || "";
+  $("ups-rpass").value = "";
+  upsToggleConn();
 
   const u = x.ups;
   if (!x.enabled) {
@@ -5956,7 +5962,8 @@ async function loadUps() {
     setNote("ups-note", "uključi kvačicom i primijeni");
   } else if (!u) {
     setPill(badge, "warn", "UPS se ne javlja");
-    setNote("ups-note", x.error || "driver ne vidi UPS — provjeri USB kabel");
+    setNote("ups-note", x.error ||
+      (x.conn === "remote" ? "udaljeni NUT ne odgovara" : "driver ne vidi UPS — provjeri USB kabel"));
   } else {
     const onBatt = (u.status || "").split(" ").includes("OB");
     const lowBatt = (u.status || "").split(" ").includes("LB");
@@ -5986,6 +5993,15 @@ async function loadUps() {
   }
 }
 
+// prikaži polja prema vrsti veze (USB vs udaljeni NUT)
+function upsToggleConn() {
+  const remote = $("ups-conn").value === "remote";
+  $("ups-usb-fields").classList.toggle("hidden", remote);
+  $("ups-remote-fields").classList.toggle("hidden", !remote);
+  $("ups-remote-hint").classList.toggle("hidden", !remote);
+}
+$("ups-conn").addEventListener("change", upsToggleConn);
+
 $("ups-refresh").addEventListener("click", () => loadUps().catch(alertErr));
 
 $("ups-install").addEventListener("click", async () => {
@@ -6006,8 +6022,13 @@ $("ups-save").addEventListener("click", async () => {
   try {
     const r = await api("/ups/set", "POST", {
       enabled: $("ups-enabled").checked,
+      conn: $("ups-conn").value,
       driver: $("ups-driver").value,
       low_pct: parseInt($("ups-low").value, 10) || 0,
+      remote_host: $("ups-rhost").value.trim(),
+      remote_ups: $("ups-rups").value.trim(),
+      remote_user: $("ups-ruser").value.trim(),
+      remote_pass: $("ups-rpass").value,
     });
     $("ups-result").textContent = r.note || "Spremljeno.";
     await loadUps();

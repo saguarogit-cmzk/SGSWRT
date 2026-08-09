@@ -736,9 +736,17 @@ na vanjski syslog poslužitelj (kartica ispod).
   NAS preko SCP-a. Backup koji leži samo na uređaju nije backup.
   - Prijava ide **SSH ključem** koji uređaj sam napravi; njegov javni dio treba
     dodati na poslužitelju u `~/.ssh/authorized_keys` upisanog korisnika.
-  - Arhiva se prije slanja **šifrira** (AES-256-GCM, lozinka se rastegne
-    PBKDF2-om) jer sadrži privatne ključeve VPN-a, API token i lozinke.
-    **Lozinku zapiši na sigurno — bez nje se arhiva ne može otvoriti.**
+  - **Šifriraj arhivu prije slanja** (preporučeno, uključeno): arhiva se šifrira
+    (AES-256-GCM, lozinka se rastegne PBKDF2-om) jer sadrži privatne ključeve
+    VPN-a, API token i lozinke. **Lozinka je najmanje 12 znakova.** Kod
+    spremanja se **prazno polje lozinke** tumači kao „zadrži postojeću" — ne
+    moraš je ponovno tipkati pri svakoj izmjeni. **Zapiši je na sigurno — bez
+    nje se arhiva ne može otvoriti.**
+  - **Status slanja**: uz postavke stoje *Zadnje uspješno slanje* (datum i
+    vrijeme) i *Zadnja greška* — brz uvid radi li offsite kako treba.
+  - **Pošalji zadnju arhivu odmah** — ručno pošalje posljednju napravljenu
+    arhivu na poslužitelj bez čekanja sljedećeg backupa; korisno za provjeru
+    da su ključ i prijava ispravni.
   - Otvaranje šifrirane arhive:
     ```sh
     saguaro-core -decrypt-backup arhiva.tar.gz.enc -backup-pass 'lozinka'
@@ -1029,16 +1037,26 @@ instalira jednim klikom, kao i haproxy za obrnuti proxy.
 
 ## UPS (Status) — neprekidno napajanje
 
-Uređaj spojen na UPS preko USB kabela zna kad je nestala struja i koliko
-baterije još ima. Ispod je standardni **NUT** (Network UPS Tools): driver
-razgovara s UPS-om, `upsd` drži stanje (sluša samo na 127.0.0.1), a `upsmon`
-**uredno ugasi uređaj** kad UPS javi da je baterija pri kraju — to radi sam,
-čak i da Saguaro servis ne radi.
+Ispod je standardni **NUT** (Network UPS Tools). `upsmon` **uredno ugasi
+uređaj** kad UPS javi da je baterija pri kraju — to radi sam, čak i da Saguaro
+servis ne radi. Dvije vrste veze:
+
+- **USB** — UPS spojen kabelom na ovaj uređaj. Lokalni driver razgovara s
+  UPS-om, `upsd` drži stanje (sluša samo na 127.0.0.1), `upsmon` je *primary*
+  i po potrebi gasi i sam UPS.
+- **Udaljeni NUT** — UPS koji već prati **drugi NUT poslužitelj na mreži**
+  (NAS poput Synology/QNAP, ili drugi Saguaro). Upiše se adresa poslužitelja,
+  ime UPS-a na njemu (`ups@host`) i po potrebi korisnik/lozinka. Saguaro je tu
+  *secondary*: **prati tuđi UPS i uredno gasi sebe** kad UPS ostane bez
+  baterije, ali **nikad ne gasi tuđi UPS** (to je posao njegovog vlasnika).
+  Pretpostavlja se da je ovaj uređaj napajan s tog UPS-a — inače nema što
+  štititi. Na udaljenom NUT-u mora biti dopušten pristup s ovog uređaja
+  (`upsd` sluša na mreži + korisnik za nadzor).
 
 - **Instalacija na klik** — NUT paketi se instaliraju iz sučelja (treba
   internet na uređaju), kao i tcpdump za snimanje prometa.
-- **Driveri**: `usbhid-ups` pokriva gotovo sve novije USB UPS-e (APC, Eaton,
-  CyberPower…), `nutdrv_qx` starije i jeftinije (Megatec/Q1 protokol).
+- **Driveri (USB)**: `usbhid-ups` pokriva gotovo sve novije USB UPS-e (APC,
+  Eaton, CyberPower…), `nutdrv_qx` starije i jeftinije (Megatec/Q1 protokol).
 - **Stanje u sučelju**: napajanje (mreža/baterija), napunjenost, procjena
   autonomije, opterećenje. Saguaro čita `upsc` svakih 15 sekundi.
 - **Događaji**: nestanak struje, povratak struje, slaba baterija i gubitak
@@ -1047,11 +1065,13 @@ razgovara s UPS-om, `upsd` drži stanje (sluša samo na 127.0.0.1), a `upsmon`
 - **Prag gašenja** je tvornički prag samog UPS-a; postotak se upisuje samo
   ako se gašenje želi ranije (driveru se doda
   `override.battery.charge.low`).
-- Ako UPS nije spojen ili ga driver ne prepozna, sučelje pošteno piše
-  „UPS se ne javlja" — ništa se ne izmišlja.
+- Ako UPS nije spojen, driver ga ne prepozna ili udaljeni NUT ne odgovara,
+  sučelje pošteno piše „UPS/udaljeni NUT se ne javlja" — ništa se ne izmišlja.
 
-Konfiguracija je u `nut_server` / `nut_monitor` (sag_ zapisi); upsd traži
-prijavu (korisnik `saguaro`, nasumična lozinka) i dostupan je samo s uređaja.
+Konfiguracija je u `nut_server` / `nut_monitor` (sag_ zapisi). Kod USB veze
+`upsd` traži prijavu (korisnik `saguaro`, nasumična lozinka) i dostupan je samo
+s uređaja; kod udaljene veze lokalni `upsd` se ne pokreće — Saguaro je samo
+klijent tuđeg NUT-a.
 
 ## Certifikat sučelja (Settings)
 

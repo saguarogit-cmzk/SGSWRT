@@ -311,8 +311,8 @@ func (s *server) checkDaemons(ctx context.Context) {
 		{"dnsmasq", "DNS/DHCP (dnsmasq)", "dnsmasq", initEnabled("dnsmasq")},
 		{"haproxy", "Obrnuti proxy (haproxy)", "haproxy", initEnabled("haproxy")},
 		{"bird", "OSPF (bird)", "bird", s.getSetting("ospf_enabled", "0") == "1"},
-		{"upsd", "UPS poslužitelj (upsd)", "upsd", upsInstalled() && upsEnabled(ctx)},
-		{"upsmon", "UPS monitor (upsmon)", "upsmon", upsInstalled() && upsEnabled(ctx)},
+		{"upsd", "UPS poslužitelj (upsd)", "upsd", upsInstalled() && s.upsEnabled() && s.upsConn() == "usb"},
+		{"upsmon", "UPS monitor (upsmon)", "upsmon", upsInstalled() && s.upsEnabled()},
 	}
 	for _, d := range daemons {
 		if !d.on {

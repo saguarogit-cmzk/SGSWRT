@@ -2044,14 +2044,16 @@
       </div></details>
 
       <details class="help"><summary>UPS — neprekidno napajanje</summary><div>
-        Uređaj spojen na UPS preko USB kabela zna kad je nestala struja i koliko
-        baterije još ima. <b>Uredno gašenje pri praznoj bateriji radi sam NUT</b>
-        (upsmon), čak i da Saguaro ne radi. NUT paketi se instaliraju jednim
-        klikom; driver <code>usbhid-ups</code> pokriva većinu novijih USB
-        UPS-eva, <code>nutdrv_qx</code> starije. Sučelje pokazuje napajanje,
-        bateriju, autonomiju i opterećenje. Nestanak struje, povratak, slabu
-        bateriju i gubitak veze s UPS-om uređaj javlja e-mailom (vrsta „UPS").
-        Ako UPS nije spojen, pošteno piše da se ne javlja.
+        UPS spojen <b>USB kabelom</b> na uređaj, ili UPS koji prati <b>drugi NUT
+        poslužitelj na mreži</b> (NAS, drugi Saguaro). <b>Uredno gašenje pri
+        praznoj bateriji radi sam NUT</b> (upsmon), čak i da Saguaro ne radi.
+        NUT paketi se instaliraju jednim klikom. Kod USB veze driver
+        <code>usbhid-ups</code> pokriva većinu novijih UPS-eva,
+        <code>nutdrv_qx</code> starije. Kod udaljene veze Saguaro samo prati
+        tuđi UPS i gasi <b>sebe</b> (nikad tuđi UPS). Sučelje pokazuje
+        napajanje, bateriju, autonomiju i opterećenje; nestanak struje,
+        povratak, slabu bateriju i gubitak veze javlja e-mailom (vrsta „UPS").
+        Ako se UPS ili udaljeni NUT ne javlja, pošteno to piše.
       </div></details>
 
       <details class="help"><summary>Reports — mjesečni izvještaj</summary><div>
@@ -2621,18 +2623,25 @@
         <span class="head-note" id="ups-note">—</span>
         <button id="ups-refresh" class="ghost">Osvježi</button>
       </div>
-      <p class="hint">Uređaj spojen na UPS preko USB kabela zna kad je nestala
-        struja i koliko baterije još ima. <b>Uredno gašenje pri praznoj
-        bateriji radi sam NUT</b> (upsmon) — čak i da Saguaro servis ne radi.
-        Saguaro povrh toga bilježi događaje i javlja ih e-mailom: nestanak
-        struje, povratak, slabu bateriju i gubitak veze s UPS-om — vrsta
-        „UPS" u modulu Alerts, zadano isključena kao i sve ostale.</p>
+      <p class="hint">UPS spojen <b>USB kabelom</b> na uređaj, ili UPS koji
+        prati <b>drugi NUT poslužitelj na mreži</b> (NAS, drugi Saguaro).
+        <b>Uredno gašenje pri praznoj bateriji radi sam NUT</b> (upsmon) — čak i
+        da Saguaro servis ne radi. Saguaro povrh toga bilježi događaje i javlja
+        ih e-mailom: nestanak struje, povratak, slabu bateriju i gubitak veze —
+        vrsta „UPS" u modulu Alerts, zadano isključena kao i sve ostale.</p>
       <div class="form-actions hidden" id="ups-install-wrap" style="justify-content:flex-start">
         <button id="ups-install" class="primary">Instaliraj NUT pakete</button>
       </div>
       <div id="ups-controls" class="hidden">
         <div class="form-grid wide-4">
           <label class="check"><input id="ups-enabled" type="checkbox"> Nadzor UPS-a uključen</label>
+          <label>Vrsta veze
+            <select id="ups-conn">
+              <option value="usb">USB — UPS spojen na ovaj uređaj</option>
+              <option value="remote">Udaljeni NUT — UPS na drugom poslužitelju</option>
+            </select></label>
+        </div>
+        <div class="form-grid wide-4" id="ups-usb-fields">
           <label>Driver
             <select id="ups-driver">
               <option value="usbhid-ups">usbhid-ups — USB, većina novijih (APC, Eaton, CyberPower…)</option>
@@ -2641,6 +2650,17 @@
           <label>Prag baterije za gašenje (%)
             <input id="ups-low" type="number" min="0" max="90" placeholder="tvornički prag UPS-a"></label>
         </div>
+        <div class="form-grid wide-4 hidden" id="ups-remote-fields">
+          <label>Poslužitelj (IP ili ime)<input id="ups-rhost" placeholder="npr. 192.168.50.20"></label>
+          <label>Ime UPS-a na njemu<input id="ups-rups" placeholder="npr. ups (ups@host)"></label>
+          <label>Korisnik (ako traži)<input id="ups-ruser" autocomplete="off" placeholder="neobavezno"></label>
+          <label>Lozinka (ako traži)<input id="ups-rpass" type="password" autocomplete="new-password" placeholder="prazno = zadrži"></label>
+        </div>
+        <p class="hint hidden" id="ups-remote-hint">Za slučaj da je <b>ovaj uređaj
+          napajan s tog UPS-a</b> (npr. i uređaj i NAS na istom UPS-u): Saguaro
+          prati tuđi UPS i uredno gasi <b>sebe</b> kad UPS ostane bez baterije —
+          nikad ne gasi tuđi UPS (to radi njegov vlasnik). Na udaljenom NUT-u
+          mora biti dopušten pristup s ovog uređaja (upsd LISTEN + korisnik).</p>
         <div class="form-actions" style="justify-content:flex-start">
           <button id="ups-save" class="primary">Primijeni</button>
         </div>

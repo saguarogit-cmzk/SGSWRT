@@ -51,12 +51,13 @@ type upsState struct {
 
 var upsCur upsState
 
-// upscRead pročita sve varijable UPS-a. Greška znači da driver ne radi ili
-// UPS nije spojen — i to je informacija, pa se sprema.
-func upscRead(ctx context.Context) (map[string]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+// upscRead pročita sve varijable UPS-a s danog cilja (ups@host). Greška znači
+// da driver/mrežni NUT ne radi ili UPS nije spojen — i to je informacija.
+// Mrežni cilj zna kasniti, pa je timeout nešto veći.
+func upscRead(ctx context.Context, target string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "upsc", upsName+"@127.0.0.1").Output()
+	out, err := exec.CommandContext(ctx, "upsc", target).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -80,10 +81,32 @@ func upsInstalled() bool {
 	return err == nil
 }
 
-// upsEnabled kaže je li Saguaro upisao i uključio svoju NUT konfiguraciju.
-func upsEnabled(ctx context.Context) bool {
-	return uciGet(ctx, "nut_server."+upsName+".driver") != "" &&
-		uciGet(ctx, "nut_server."+upsName+".sag_enabled") == "1"
+// upsConn vraća tip veze: "usb" (lokalni UPS na USB-u) ili "remote" (UPS na
+// drugom NUT poslužitelju kojeg samo pratimo). Zadano usb.
+func (s *server) upsConn() string {
+	c := s.getSetting("ups_conn", "usb")
+	if c != "remote" {
+		return "usb"
+	}
+	return "remote"
+}
+
+// upsEnabled kaže je li Saguaro uključio svoj UPS nadzor (bilo koji tip).
+func (s *server) upsEnabled() bool {
+	return s.getSetting("ups_enabled", "0") == "1"
+}
+
+// upsTarget vraća upsc cilj prema tipu veze: lokalno sag_ups@127.0.0.1, ili
+// <ime>@<host> udaljenog NUT poslužitelja.
+func (s *server) upsTarget(ctx context.Context) string {
+	if s.upsConn() == "remote" {
+		name := uciGet(ctx, "nut_monitor.sag_remote.upsname")
+		host := uciGet(ctx, "nut_monitor.sag_remote.hostname")
+		if name != "" && host != "" {
+			return name + "@" + host
+		}
+	}
+	return upsName + "@127.0.0.1"
 }
 
 /* ---------- petlja: očitanje i događaji ---------- */
@@ -95,10 +118,10 @@ func (s *server) upsLoop() {
 	for {
 		time.Sleep(upsPollEvery)
 		ctx := context.Background()
-		if !upsInstalled() || !upsEnabled(ctx) {
+		if !upsInstalled() || !s.upsEnabled() {
 			continue
 		}
-		vars, err := upscRead(ctx)
+		vars, err := upscRead(ctx, s.upsTarget(ctx))
 
 		upsCur.mu.Lock()
 		if err != nil {
@@ -118,9 +141,13 @@ func (s *server) upsLoop() {
 		}
 		if changed, prev := s.alertValue("ups:comm", comm); changed {
 			if comm == "lost" {
-				s.alert("ups", "warning",
-					"Veza s UPS-om je izgubljena — driver se ne javlja. "+
-						"Provjeri USB kabel i je li UPS upaljen.")
+				lostMsg := "Veza s UPS-om je izgubljena — driver se ne javlja. " +
+					"Provjeri USB kabel i je li UPS upaljen."
+				if s.upsConn() == "remote" {
+					lostMsg = "Veza s udaljenim NUT poslužiteljem je izgubljena — " +
+						"provjeri je li dostupan i radi li na njemu NUT."
+				}
+				s.alert("ups", "warning", lostMsg)
 			} else if prev == "lost" {
 				s.alert("ups", "info", "Veza s UPS-om je ponovno uspostavljena.")
 			}
@@ -200,15 +227,20 @@ func (s *server) handleUPSGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	out["enabled"] = upsEnabled(ctx)
+	out["enabled"] = s.upsEnabled()
+	out["conn"] = s.upsConn()
 	out["driver"] = uciGet(ctx, "nut_server."+upsName+".driver")
 	if v := uciGet(ctx, "nut_server.override_battery_charge_low.value"); v != "" {
 		out["low_pct"] = v
 	}
+	// udaljeni NUT: host, ime UPS-a i korisnik (lozinka se NE vraća)
+	out["remote_host"] = uciGet(ctx, "nut_monitor.sag_remote.hostname")
+	out["remote_ups"] = uciGet(ctx, "nut_monitor.sag_remote.upsname")
+	out["remote_user"] = uciGet(ctx, "nut_monitor.sag_remote.username")
 
 	// svježe očitanje na zahtjev — GUI ne čeka petlju
 	if out["enabled"] == true {
-		vars, err := upscRead(ctx)
+		vars, err := upscRead(ctx, s.upsTarget(ctx))
 		if err == nil {
 			upsCur.mu.Lock()
 			upsCur.vars, upsCur.readAt, upsCur.lastErr = vars, time.Now(), ""
@@ -236,7 +268,11 @@ func (s *server) handleUPSGet(w http.ResponseWriter, r *http.Request) {
 		}
 		out["ups"] = st
 	} else if upsCur.lastErr != "" {
-		out["error"] = "UPS se ne javlja (driver ne radi ili UPS nije spojen)"
+		if s.upsConn() == "remote" {
+			out["error"] = "Udaljeni NUT se ne javlja (provjeri host, ime UPS-a i prijavu)"
+		} else {
+			out["error"] = "UPS se ne javlja (driver ne radi ili UPS nije spojen)"
+		}
 	}
 	upsCur.mu.RUnlock()
 	writeJSON(w, http.StatusOK, out)
@@ -262,8 +298,14 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in struct {
 		Enabled *bool  `json:"enabled"`
+		Conn    string `json:"conn"` // usb | remote
 		Driver  string `json:"driver"`
 		LowPct  int    `json:"low_pct"` // 0 = prepusti UPS-u tvornički prag
+		// udaljeni NUT
+		RemoteHost string `json:"remote_host"`
+		RemoteUps  string `json:"remote_ups"`
+		RemoteUser string `json:"remote_user"`
+		RemotePass string `json:"remote_pass"`
 	}
 	if !decodeBody(w, r, &in) {
 		return
@@ -276,16 +318,8 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "prvo instaliraj NUT pakete")
 		return
 	}
-	if in.Driver == "" {
-		in.Driver = "usbhid-ups"
-	}
-	if _, ok := upsDrivers[in.Driver]; !ok {
-		writeErr(w, http.StatusBadRequest, "nepoznat driver: "+in.Driver)
-		return
-	}
-	if in.LowPct < 0 || in.LowPct > 90 {
-		writeErr(w, http.StatusBadRequest, "prag baterije: 0–90 %")
-		return
+	if in.Conn != "remote" {
+		in.Conn = "usb"
 	}
 
 	for _, p := range []string{nutServerConfig, nutMonitorConfig} {
@@ -295,82 +329,152 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// lozinka veže upsmon na upsd (samo 127.0.0.1); generira se jednom
-	pw := uciGet(ctx, "nut_server.sag_user.password")
-	if pw == "" {
-		raw := make([]byte, 12)
-		if _, err := rand.Read(raw); err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		pw = hex.EncodeToString(raw)
-	}
-
-	en := "0"
-	if *in.Enabled {
-		en = "1"
-	}
 	var b strings.Builder
-	// nut_server: driver + korisnik + slušanje samo lokalno
-	b.WriteString("set nut_server." + upsName + "=driver\n")
-	b.WriteString("set nut_server." + upsName + ".driver=" + in.Driver + "\n")
-	b.WriteString("set nut_server." + upsName + ".port=auto\n")
-	b.WriteString("set nut_server." + upsName + ".sag_enabled=" + en + "\n")
-	// prag baterije: init skripta NUT-a čita listu override u driver sekciji
-	// i vrijednost iz zasebne sekcije override_<varijabla> (s '_' umjesto '.')
-	b.WriteString("delete nut_server." + upsName + ".override\n")
-	b.WriteString("delete nut_server.override_battery_charge_low\n")
-	if in.LowPct > 0 {
-		b.WriteString("add_list nut_server." + upsName + ".override=battery_charge_low\n")
-		b.WriteString("set nut_server.override_battery_charge_low=override\n")
-		b.WriteString("set nut_server.override_battery_charge_low.value=" +
-			strconv.Itoa(in.LowPct) + "\n")
-	}
-	b.WriteString("set nut_server.sag_user=user\n")
-	b.WriteString("set nut_server.sag_user.username=saguaro\n")
-	b.WriteString("set nut_server.sag_user.password=" + pw + "\n")
-	b.WriteString("set nut_server.sag_user.upsmon=master\n")
-	b.WriteString("set nut_server.sag_listen=listen_address\n")
-	b.WriteString("set nut_server.sag_listen.address=127.0.0.1\n")
-	b.WriteString("set nut_server.sag_listen.port=3493\n")
-	b.WriteString("commit nut_server\n")
-	// nut_monitor: upsmon kao master — on gasi uređaj kad je baterija prazna
+	// stara konfiguracija oba tipa se počisti pa se upiše odabrani (nema
+	// zaostalog sag_master kad se prebaci na remote i obrnuto)
+	b.WriteString("delete nut_monitor.sag_master\n")
+	b.WriteString("delete nut_monitor.sag_remote\n")
 	b.WriteString("set nut_monitor.upsmon=upsmon\n")
 	b.WriteString("set nut_monitor.upsmon.minsupplies=1\n")
-	b.WriteString("set nut_monitor.sag_master=master\n")
-	b.WriteString("set nut_monitor.sag_master.upsname=" + upsName + "\n")
-	b.WriteString("set nut_monitor.sag_master.hostname=127.0.0.1\n")
-	b.WriteString("set nut_monitor.sag_master.powervalue=1\n")
-	b.WriteString("set nut_monitor.sag_master.username=saguaro\n")
-	b.WriteString("set nut_monitor.sag_master.password=" + pw + "\n")
-	b.WriteString("commit nut_monitor\n")
+
+	if in.Conn == "usb" {
+		if in.Driver == "" {
+			in.Driver = "usbhid-ups"
+		}
+		if _, ok := upsDrivers[in.Driver]; !ok {
+			writeErr(w, http.StatusBadRequest, "nepoznat driver: "+in.Driver)
+			return
+		}
+		if in.LowPct < 0 || in.LowPct > 90 {
+			writeErr(w, http.StatusBadRequest, "prag baterije: 0–90 %")
+			return
+		}
+		// lozinka veže upsmon na lokalni upsd (samo 127.0.0.1); generira se jednom
+		pw := uciGet(ctx, "nut_server.sag_user.password")
+		if pw == "" {
+			raw := make([]byte, 12)
+			if _, err := rand.Read(raw); err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			pw = hex.EncodeToString(raw)
+		}
+		en := "0"
+		if *in.Enabled {
+			en = "1"
+		}
+		// nut_server: lokalni driver + korisnik + slušanje samo lokalno
+		b.WriteString("set nut_server." + upsName + "=driver\n")
+		b.WriteString("set nut_server." + upsName + ".driver=" + in.Driver + "\n")
+		b.WriteString("set nut_server." + upsName + ".port=auto\n")
+		b.WriteString("set nut_server." + upsName + ".sag_enabled=" + en + "\n")
+		b.WriteString("delete nut_server." + upsName + ".override\n")
+		b.WriteString("delete nut_server.override_battery_charge_low\n")
+		if in.LowPct > 0 {
+			b.WriteString("add_list nut_server." + upsName + ".override=battery_charge_low\n")
+			b.WriteString("set nut_server.override_battery_charge_low=override\n")
+			b.WriteString("set nut_server.override_battery_charge_low.value=" +
+				strconv.Itoa(in.LowPct) + "\n")
+		}
+		b.WriteString("set nut_server.sag_user=user\n")
+		b.WriteString("set nut_server.sag_user.username=saguaro\n")
+		b.WriteString("set nut_server.sag_user.password=" + pw + "\n")
+		b.WriteString("set nut_server.sag_user.upsmon=master\n")
+		b.WriteString("set nut_server.sag_listen=listen_address\n")
+		b.WriteString("set nut_server.sag_listen.address=127.0.0.1\n")
+		b.WriteString("set nut_server.sag_listen.port=3493\n")
+		b.WriteString("commit nut_server\n")
+		// upsmon kao MASTER lokalnog UPS-a — on gasi uređaj kad je baterija prazna
+		b.WriteString("set nut_monitor.sag_master=master\n")
+		b.WriteString("set nut_monitor.sag_master.upsname=" + upsName + "\n")
+		b.WriteString("set nut_monitor.sag_master.hostname=127.0.0.1\n")
+		b.WriteString("set nut_monitor.sag_master.powervalue=1\n")
+		b.WriteString("set nut_monitor.sag_master.username=saguaro\n")
+		b.WriteString("set nut_monitor.sag_master.password=" + pw + "\n")
+		b.WriteString("commit nut_monitor\n")
+	} else {
+		// udaljeni NUT: samo pratimo tuđi UPS i gasimo SEBE (secondary,
+		// powervalue=0) — nikad ne izdajemo naredbu gašenja tuđem UPS-u
+		host := strings.TrimSpace(in.RemoteHost)
+		name := strings.TrimSpace(in.RemoteUps)
+		user := strings.TrimSpace(in.RemoteUser)
+		if *in.Enabled && (host == "" || name == "") {
+			writeErr(w, http.StatusBadRequest,
+				"za udaljeni NUT upiši adresu poslužitelja i ime UPS-a (ups@host)")
+			return
+		}
+		// lozinka: prazno = zadrži postojeću
+		pass := in.RemotePass
+		if pass == "" {
+			pass = uciGet(ctx, "nut_monitor.sag_remote.password")
+		}
+		// lokalni upsd se gasi — kod remote tipa nije potreban
+		b.WriteString("set nut_server." + upsName + ".sag_enabled=0\n")
+		b.WriteString("commit nut_server\n")
+		// type=slave (secondary): pratimo tuđi UPS i gasimo SEBE, ali NIKAD ne
+		// izdajemo naredbu gašenja UPS-u — to radi njegov primary. powervalue=1
+		// jer ovaj uređaj napaja taj UPS (zato se i gasi kad UPS ostane bez
+		// baterije); s powervalue=0 upsmon bi javio "insufficient power" i stao.
+		b.WriteString("set nut_monitor.sag_remote=slave\n")
+		b.WriteString("set nut_monitor.sag_remote.upsname=" + name + "\n")
+		b.WriteString("set nut_monitor.sag_remote.hostname=" + host + "\n")
+		b.WriteString("set nut_monitor.sag_remote.powervalue=1\n")
+		if user != "" {
+			b.WriteString("set nut_monitor.sag_remote.username=" + user + "\n")
+		}
+		if pass != "" {
+			b.WriteString("set nut_monitor.sag_remote.password=" + pass + "\n")
+		}
+		b.WriteString("commit nut_monitor\n")
+	}
 	if err := uciBatch(ctx, b.String()); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	action := "restart"
-	if !*in.Enabled {
-		action = "stop"
-	}
-	if err := serviceReload(ctx, "nut-server", action); err != nil && *in.Enabled {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := serviceReload(ctx, "nut-monitor", action); err != nil && *in.Enabled {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if *in.Enabled {
-		_ = serviceReload(ctx, "nut-server", "enable")
-		_ = serviceReload(ctx, "nut-monitor", "enable")
-		addEvent(s, "info", "UPS nadzor uključen (driver "+in.Driver+")")
+	// Saguaro-razina: pamti tip veze i je li uključeno (izvor istine za
+	// upsEnabled/upsConn/upsTarget)
+	s.setSetting("ups_conn", in.Conn)
+	s.setSetting("ups_enabled", boolSetting(*in.Enabled))
+
+	// USB tip vozi lokalni upsd (nut-server); remote tip ga ne treba
+	if in.Conn == "usb" {
+		if *in.Enabled {
+			_ = serviceReload(ctx, "nut-server", "enable")
+			_ = serviceReload(ctx, "nut-server", "restart")
+		} else {
+			_ = serviceReload(ctx, "nut-server", "stop")
+			_ = serviceReload(ctx, "nut-server", "disable")
+		}
 	} else {
+		_ = serviceReload(ctx, "nut-server", "stop")
 		_ = serviceReload(ctx, "nut-server", "disable")
+	}
+	// upsmon (nut-monitor) vozi oba tipa
+	if *in.Enabled {
+		if err := serviceReload(ctx, "nut-monitor", "restart"); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = serviceReload(ctx, "nut-monitor", "enable")
+	} else {
+		_ = serviceReload(ctx, "nut-monitor", "stop")
 		_ = serviceReload(ctx, "nut-monitor", "disable")
+	}
+
+	switch {
+	case !*in.Enabled:
 		addEvent(s, "info", "UPS nadzor isključen")
+	case in.Conn == "remote":
+		addEvent(s, "info", "UPS nadzor uključen (udaljeni NUT "+
+			strings.TrimSpace(in.RemoteUps)+"@"+strings.TrimSpace(in.RemoteHost)+")")
+	default:
+		addEvent(s, "info", "UPS nadzor uključen (USB, driver "+in.Driver+")")
 	}
 	note := "driveru treba koja sekunda da nađe UPS nakon uključivanja"
+	if in.Conn == "remote" {
+		note = "spajam se na udaljeni NUT — provjeri stanje za koju sekundu"
+	}
 	if !*in.Enabled {
 		note = "UPS nadzor je isključen, NUT servisi su zaustavljeni"
 	}
