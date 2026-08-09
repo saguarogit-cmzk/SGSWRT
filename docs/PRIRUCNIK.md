@@ -797,10 +797,19 @@ radnja koja se ne može poništiti na daljinu**.
 Modul provjerava zadnje izdanje na GitHubu; nadogradnja se pokreće gumbom ili
 ručnim učitavanjem paketa (za uređaj bez pristupa internetu). Prije svake
 nadogradnje automatski se radi puni backup; nakon zamjene servis se sam
-ponovno pokreće. Konfiguracija, baza i certifikati se ne diraju.
+ponovno pokreće. Konfiguracija, baza i certifikati se ne diraju. Nadogradnju
+smije pokrenuti (i učitati paket) **samo administrator**.
+
+> **Provjera otiska (SHA-256).** Uz svaki paket izdanje objavljuje i `.sha256`.
+> Kod nadogradnje s GitHuba uređaj taj otisak preuzme i **usporedi s preuzetim
+> paketom prije nego išta raspakira**; ako se ne poklapa (oštećen prijenos ili
+> podmetnut paket), nadogradnja se odbija i paket briše. Iz paketa se ionako
+> uzima samo dopušteni sadržaj (program, sučelje, konzolni alati), a `saguaro-core`
+> mora biti valjana Linux binarna datoteka.
 
 Objava izdanja: `git tag vX.Y.Z && git push --tags` — GitHub Actions sagradi i
-objavi paket.
+objavi paket (uz `.sha256`) tek nakon što prođu testovi, provjera sučelja i
+provjera slike.
 
 ### Disk i root particija (tiče se samo nadogradnje OpenWrt-a)
 
@@ -1116,13 +1125,20 @@ postavio:
 |---|---|
 | **Administrator** | sve, uključivo korisnike, API token i nepovratne zahvate |
 | **Operater** | svakodnevni rad: mreža, firewall, VPN, DHCP, backup, dijagnostika |
-| **Pregled** | samo gledanje (GET), ništa se ne mijenja |
+| **Pregled** | samo gledanje, bez preuzimanja tajni (vidi niže) |
 
 Operateru i pregledu zatvoreno je ovo: **upravljanje korisnicima**, **API
 token** (pročitan je jednako opasan kao promijenjen), **lozinka uređaja**,
-**upis firmwarea**, **dijeljenje diska** i **vraćanje backupa**. Popis je
-namjerno kratak i drži se dvije vrste opasnosti: preuzimanje potpune kontrole i
-nepovratni zahvati.
+**upis firmwarea i nadogradnja**, **dijeljenje diska** i **vraćanje backupa**.
+Popis je namjerno kratak i drži se dvije vrste opasnosti: preuzimanje potpune
+kontrole i nepovratni zahvati.
+
+- **Pregled ne smije preuzeti tajne**, iako inače smije čitati. Zatvoreno mu je:
+  **VPN konfiguracije** (WireGuard, Site-to-site, OpenVPN — sadrže privatni
+  ključ), **backup arhive** (nose ključeve, token i lozinke) i **snimke prometa**
+  (`.pcap`). Uz to, u UPS modulu ne vidi lozinku za dijeljenje UPS-a. Razlog:
+  račun dan vanjskom nadzoru „samo za grafove" inače bi mogao povući radni VPN
+  pristup u mrežu. Te radnje ostaju operateru i administratoru.
 
 - **Nova lozinka koju postavi administrator je privremena** — korisnik je mora
   promijeniti pri prvoj prijavi, a sve njegove sesije se odmah zatvaraju. Inače
