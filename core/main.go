@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.56.1"
+const version = "0.56.2"
 
 type server struct {
 	tokenMu       sync.RWMutex
@@ -515,7 +515,14 @@ func mutatingRequest(method, path string) bool {
 		// priprema slike ne dira konfiguraciju uređaja
 		"/api/v1/openwrt/build", "/api/v1/openwrt/fetch", "/api/v1/openwrt/upload",
 		// snimanje prometa ne mijenja konfiguraciju
-		"/api/v1/capture/install", "/api/v1/capture/start", "/api/v1/capture/stop":
+		"/api/v1/capture/install", "/api/v1/capture/start", "/api/v1/capture/stop",
+		// mrežni alati i prekid veze ne diraju uci konfiguraciju
+		"/api/v1/diag/ping", "/api/v1/diag/traceroute", "/api/v1/diag/lookup",
+		"/api/v1/diag/portcheck", "/api/v1/diag/conn/kill", "/api/v1/diag/conn/install":
+		return false
+	}
+	// Wake-on-LAN (…/hosts/{uuid}/wake) ne mijenja konfiguraciju
+	if strings.HasSuffix(path, "/wake") {
 		return false
 	}
 	return true

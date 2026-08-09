@@ -351,6 +351,14 @@ func validateForwardDNS(w http.ResponseWriter, x *ForwardRecord) bool {
 	return true
 }
 
+// domainInSplit javlja postoji li Split DNS zapis za istu domenu (address=/d/ip
+// ima prednost pred server=/d/ip, pa se sukob mora spriječiti unaprijed).
+func (s *server) domainInSplit(domain string) bool {
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM dns_split WHERE domain=?`, domain).Scan(&n)
+	return n > 0
+}
+
 func (s *server) handleForwardList(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(`SELECT ` + forwardCols + ` FROM dns_forward ORDER BY domain`)
 	if err != nil {
@@ -384,6 +392,13 @@ func (s *server) handleForwardCreate(w http.ResponseWriter, r *http.Request) {
 	if !validateForwardDNS(w, x) {
 		return
 	}
+	// ista domena u Split DNS-u (address=/d/ip) ima prednost i tiho bi ugasila
+	// prosljeđivanje — pa se odbija da se ne dogodi nevidljiv sukob
+	if s.domainInSplit(x.Domain) {
+		writeErr(w, http.StatusConflict,
+			"ta domena već ima Split DNS zapis — ukloni njega ili koristi to")
+		return
+	}
 	x.UUID = newUUID()
 	_, err := s.db.Exec(`INSERT INTO dns_forward (uuid, domain, dns_ip, enabled, notes)
 		VALUES (?,?,?,?,?)`, x.UUID, x.Domain, x.DNSIP, enabledIntOf(in.Enabled), x.Notes)
@@ -407,6 +422,11 @@ func (s *server) handleForwardUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	x := &in.ForwardRecord
 	if !validateForwardDNS(w, x) {
+		return
+	}
+	if s.domainInSplit(x.Domain) {
+		writeErr(w, http.StatusConflict,
+			"ta domena već ima Split DNS zapis — ukloni njega ili koristi to")
 		return
 	}
 	res, err := s.db.Exec(`UPDATE dns_forward SET domain=?, dns_ip=?, enabled=?, notes=?,
@@ -544,7 +564,15 @@ func (s *server) handleDNSSECSet(w http.ResponseWriter, r *http.Request) {
 		// DNSSEC traži upstream koji prosljeđuje DNSSEC zapise; kućni/ISP
 		// routeri to često ne rade pa bi SVE domene padale. Ako korisnik
 		// nema vlastite upstreame, postavljamo javne (i pamtimo da smo mi).
-		if len(sectList(sec, "server")) == 0 {
+		// Broje se samo pravi upstreami — zapisi oblika /domena/ip (uvjetno
+		// prosljeđivanje) nisu upstream i ne smiju spriječiti dodavanje.
+		plainUpstreams := 0
+		for _, v := range sectList(sec, "server") {
+			if !strings.HasPrefix(v, "/") {
+				plainUpstreams++
+			}
+		}
+		if plainUpstreams == 0 {
 			fmt.Fprintf(&b, "add_list dhcp.%s.server=1.1.1.1\n", section)
 			fmt.Fprintf(&b, "add_list dhcp.%s.server=8.8.8.8\n", section)
 			fmt.Fprintf(&b, "set dhcp.%s.noresolv=1\n", section)
@@ -719,6 +747,7 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fwdWant := []string{}
+	fwdRebind := []string{} // /domena/ za rebind_domain (izuzeće od zaštite)
 	for fwdRows.Next() {
 		var d, ip string
 		if err := fwdRows.Scan(&d, &ip); err != nil {
@@ -727,6 +756,7 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fwdWant = append(fwdWant, "/"+d+"/"+ip)
+		fwdRebind = append(fwdRebind, "/"+d+"/")
 	}
 	fwdRows.Close()
 
@@ -753,6 +783,33 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 		for _, v := range final {
 			fmt.Fprintf(&batch, "add_list dhcp.%s.server=%s\n", dnsmasqSect, uciQuote(v))
 		}
+
+		// rebind_domain: OpenWrt zadano (rebind_protection) odbacuje privatne
+		// (RFC1918) adrese iz odgovora upstreama — a AD DNS baš takve vraća.
+		// Bez izuzeća domene uvjetno prosljeđivanje tiho vraća prazno. Lista se
+		// održava istim obrascom (čuvaju se tuđi unosi, brišu samo naši).
+		var prevR []string
+		json.Unmarshal([]byte(s.getSetting("dns_rebind_applied", "[]")), &prevR)
+		oursR := map[string]bool{}
+		for _, p := range prevR {
+			oursR[p] = true
+		}
+		for _, wnt := range fwdRebind {
+			oursR[wnt] = true
+		}
+		keepR := []string{}
+		for _, v := range sectList(cfg[dnsmasqSect], "rebind_domain") {
+			if !oursR[v] {
+				keepR = append(keepR, v)
+			}
+		}
+		finalR := append(keepR, fwdRebind...)
+		if len(sectList(cfg[dnsmasqSect], "rebind_domain")) > 0 {
+			fmt.Fprintf(&batch, "delete dhcp.%s.rebind_domain\n", dnsmasqSect)
+		}
+		for _, v := range finalR {
+			fmt.Fprintf(&batch, "add_list dhcp.%s.rebind_domain=%s\n", dnsmasqSect, uciQuote(v))
+		}
 	}
 	batch.WriteString("commit dhcp\n")
 
@@ -765,6 +822,8 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 		s.setSetting("dns_split_applied", string(b))
 		fb, _ := json.Marshal(fwdWant)
 		s.setSetting("dns_forward_applied", string(fb))
+		rb, _ := json.Marshal(fwdRebind)
+		s.setSetting("dns_rebind_applied", string(rb))
 	}
 	// promjena address=/server= zapisa traži restart, reload nije dovoljan
 	if err := serviceReload(ctx, "dnsmasq", "restart"); err != nil {

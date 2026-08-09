@@ -54,7 +54,10 @@ func adminOnlyPath(path string) bool {
 		return true
 	case path == "/api/v1/system/reboot", path == "/api/v1/system/poweroff":
 		return true
-	case path == "/api/v1/openwrt/flash":
+	// nadogradnja = zamjena programa i pisanje kao root; smije samo administrator
+	case path == "/api/v1/update/upload", path == "/api/v1/update/apply":
+		return true
+	case path == "/api/v1/openwrt/flash", path == "/api/v1/openwrt/upload":
 		return true
 	case path == "/api/v1/openwrt/datapart":
 		return true

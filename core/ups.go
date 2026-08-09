@@ -120,7 +120,8 @@ func (s *server) upsEnabled() bool {
 }
 
 // upsTarget vraća upsc cilj prema tipu veze: lokalno sag_ups@127.0.0.1, ili
-// <ime>@<host> udaljenog NUT poslužitelja.
+// <ime>@<host> udaljenog NUT poslužitelja. Za remote bez upisanih polja vraća
+// prazno — pozivatelj tada preskače očitanje umjesto da tiho čita lokalni UPS.
 func (s *server) upsTarget(ctx context.Context) string {
 	if s.upsConn() == "remote" {
 		name := uciGet(ctx, "nut_monitor.sag_remote.upsname")
@@ -128,6 +129,7 @@ func (s *server) upsTarget(ctx context.Context) string {
 		if name != "" && host != "" {
 			return name + "@" + host
 		}
+		return ""
 	}
 	return upsName + "@127.0.0.1"
 }
@@ -144,7 +146,11 @@ func (s *server) upsLoop() {
 		if !upsInstalled() || !s.upsEnabled() {
 			continue
 		}
-		vars, err := upscRead(ctx, s.upsTarget(ctx))
+		target := s.upsTarget(ctx)
+		if target == "" {
+			continue // remote bez upisanih polja — nema što čitati
+		}
+		vars, err := upscRead(ctx, target)
 
 		upsCur.mu.Lock()
 		if err != nil {
@@ -271,14 +277,17 @@ func (s *server) handleUPSGet(w http.ResponseWriter, r *http.Request) {
 	out["remote_ups"] = uciGet(ctx, "nut_monitor.sag_remote.upsname")
 	out["remote_user"] = uciGet(ctx, "nut_monitor.sag_remote.username")
 
-	// svježe očitanje na zahtjev — GUI ne čeka petlju
-	if out["enabled"] == true {
-		vars, err := upscRead(ctx, s.upsTarget(ctx))
+	// svježe očitanje na zahtjev — GUI ne čeka petlju. Greška se mora upisati,
+	// inače bi API vraćao staro (predprekidno) stanje kao trenutno.
+	if target := s.upsTarget(ctx); out["enabled"] == true && target != "" {
+		vars, err := upscRead(ctx, target)
+		upsCur.mu.Lock()
 		if err == nil {
-			upsCur.mu.Lock()
 			upsCur.vars, upsCur.readAt, upsCur.lastErr = vars, time.Now(), ""
-			upsCur.mu.Unlock()
+		} else {
+			upsCur.vars, upsCur.lastErr = nil, err.Error()
 		}
+		upsCur.mu.Unlock()
 	}
 	upsCur.mu.RLock()
 	if upsCur.vars != nil {
@@ -421,21 +430,29 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		// dijeljenje na mreži: dodatno slušanje na LAN adresi + klijentski
 		// korisnik (secondary) da druga računala na istom UPS-u dobiju gašenje.
 		// Klijent NE smije naredbe — samo prati i gasi sebe (upsmon=slave).
-		lanIP := uciGet(ctx, "network.lan.ipaddr")
-		if in.Share && *in.Enabled && lanIP != "" {
-			cpw := uciGet(ctx, "nut_server.sag_client.password")
+		// lan.ipaddr može biti lista (više adresa) — uzmi prvu; prazno = nema
+		// statičke LAN adrese pa se dijeljenje ne može uključiti
+		lanIP := strings.Fields(uciGet(ctx, "network.lan.ipaddr"))
+		shareOK := in.Share && *in.Enabled && len(lanIP) > 0
+		if shareOK {
+			// klijentska lozinka se čuva u postavci pa ostaje ista kroz
+			// isključi/uključi — inače bi sva računala izgubila pristup
+			cpw := s.getSetting("ups_client_pass", "")
 			if cpw == "" {
 				raw := make([]byte, 12)
-				if _, err := rand.Read(raw); err == nil {
-					cpw = hex.EncodeToString(raw)
+				if _, err := rand.Read(raw); err != nil {
+					writeErr(w, http.StatusInternalServerError, err.Error())
+					return
 				}
+				cpw = hex.EncodeToString(raw)
+				s.setSetting("ups_client_pass", cpw)
 			}
 			b.WriteString("set nut_server.sag_listen_net=listen_address\n")
-			b.WriteString("set nut_server.sag_listen_net.address=" + lanIP + "\n")
+			b.WriteString("set nut_server.sag_listen_net.address=" + uciQuote(lanIP[0]) + "\n")
 			b.WriteString("set nut_server.sag_listen_net.port=3493\n")
 			b.WriteString("set nut_server.sag_client=user\n")
 			b.WriteString("set nut_server.sag_client.username=nutklijent\n")
-			b.WriteString("set nut_server.sag_client.password=" + cpw + "\n")
+			b.WriteString("set nut_server.sag_client.password=" + uciQuote(cpw) + "\n")
 			b.WriteString("set nut_server.sag_client.upsmon=slave\n")
 		} else {
 			b.WriteString("delete nut_server.sag_listen_net\n")
@@ -466,22 +483,32 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 		if pass == "" {
 			pass = uciGet(ctx, "nut_monitor.sag_remote.password")
 		}
-		// lokalni upsd se gasi — kod remote tipa nije potreban
+		// kontrolni znakovi (npr. novi red) bi kroz `uci batch` ubacili druge
+		// naredbe kao root — odbijaju se, a vrijednosti se pišu kroz uciQuote
+		if hasCtrl(host) || hasCtrl(name) || hasCtrl(user) || hasCtrl(pass) {
+			writeErr(w, http.StatusBadRequest,
+				"polja ne smiju sadržavati prijelom retka ni tabulator")
+			return
+		}
+		// lokalni upsd se gasi — kod remote tipa nije potreban; miču se i
+		// zaostali dijelovi dijeljenja (slušatelj na LAN-u i klijentski račun)
 		b.WriteString("set nut_server." + upsName + ".sag_enabled=0\n")
+		b.WriteString("delete nut_server.sag_listen_net\n")
+		b.WriteString("delete nut_server.sag_client\n")
 		b.WriteString("commit nut_server\n")
 		// type=slave (secondary): pratimo tuđi UPS i gasimo SEBE, ali NIKAD ne
 		// izdajemo naredbu gašenja UPS-u — to radi njegov primary. powervalue=1
 		// jer ovaj uređaj napaja taj UPS (zato se i gasi kad UPS ostane bez
 		// baterije); s powervalue=0 upsmon bi javio "insufficient power" i stao.
 		b.WriteString("set nut_monitor.sag_remote=slave\n")
-		b.WriteString("set nut_monitor.sag_remote.upsname=" + name + "\n")
-		b.WriteString("set nut_monitor.sag_remote.hostname=" + host + "\n")
+		b.WriteString("set nut_monitor.sag_remote.upsname=" + uciQuote(name) + "\n")
+		b.WriteString("set nut_monitor.sag_remote.hostname=" + uciQuote(host) + "\n")
 		b.WriteString("set nut_monitor.sag_remote.powervalue=1\n")
 		if user != "" {
-			b.WriteString("set nut_monitor.sag_remote.username=" + user + "\n")
+			b.WriteString("set nut_monitor.sag_remote.username=" + uciQuote(user) + "\n")
 		}
 		if pass != "" {
-			b.WriteString("set nut_monitor.sag_remote.password=" + pass + "\n")
+			b.WriteString("set nut_monitor.sag_remote.password=" + uciQuote(pass) + "\n")
 		}
 		b.WriteString("commit nut_monitor\n")
 	}
@@ -494,7 +521,10 @@ func (s *server) handleUPSSet(w http.ResponseWriter, r *http.Request) {
 	// (izvor istine za upsEnabled/upsConn/upsTarget/upsShare)
 	s.setSetting("ups_conn", in.Conn)
 	s.setSetting("ups_enabled", boolSetting(*in.Enabled))
-	sharing := in.Conn == "usb" && *in.Enabled && in.Share
+	// dijeljenje je stvarno aktivno samo ako ima LAN adrese na kojoj upsd sluša
+	// (isti uvjet kao gore) — inače ni ups_share ni firewall port ne idu na 1
+	sharing := in.Conn == "usb" && *in.Enabled && in.Share &&
+		len(strings.Fields(uciGet(ctx, "network.lan.ipaddr"))) > 0
 	s.setSetting("ups_share", boolSetting(sharing))
 
 	// firewall: port 3493/tcp iz LAN-a prema uređaju samo dok se UPS dijeli

@@ -48,6 +48,7 @@ func (s *server) handleDiagPing(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	in.Host = strings.TrimSpace(in.Host) // provjera i upotreba nad istom vrijednošću
 	if !validHostArg(in.Host) {
 		writeErr(w, http.StatusBadRequest, "neispravna adresa ili ime hosta")
 		return
@@ -64,6 +65,7 @@ func (s *server) handleDiagTraceroute(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	in.Host = strings.TrimSpace(in.Host)
 	if !validHostArg(in.Host) {
 		writeErr(w, http.StatusBadRequest, "neispravna adresa ili ime hosta")
 		return
@@ -84,6 +86,7 @@ func (s *server) handleDiagPortCheck(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	in.Host = strings.TrimSpace(in.Host)
 	if !validHostArg(in.Host) {
 		writeErr(w, http.StatusBadRequest, "neispravna adresa ili ime hosta")
 		return
@@ -163,7 +166,13 @@ func (s *server) handleConnKill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "protokol mora biti tcp, udp ili icmp")
 		return
 	}
-	args := []string{"-D", "-s", in.Src, "-d", in.Dst, "-p", proto}
+	// IPv6 veze traže -f ipv6, inače conntrack radi nad IPv4 obitelji i ne
+	// pronađe zapis (a prije bi lažno javio uspjeh)
+	args := []string{"-D"}
+	if ip := net.ParseIP(in.Src); ip != nil && ip.To4() == nil {
+		args = append(args, "-f", "ipv6")
+	}
+	args = append(args, "-s", in.Src, "-d", in.Dst, "-p", proto)
 	if proto != "icmp" {
 		if in.SPort < 1 || in.SPort > 65535 || in.DPort < 1 || in.DPort > 65535 {
 			writeErr(w, http.StatusBadRequest, "neispravan port")
@@ -173,17 +182,23 @@ func (s *server) handleConnKill(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "conntrack", args...).CombinedOutput()
-	// conntrack vraća izlazni kod 0 i "1 flow entries have been deleted"; ako
-	// veza više ne postoji, vrati 1 — to nije greška za korisnika (već je gotova)
-	deleted := strings.Contains(string(out), "deleted")
-	if err != nil && !deleted {
+	out, _ := exec.CommandContext(ctx, "conntrack", args...).CombinedOutput()
+	// conntrack uvijek ispiše "<n> flow entries have been deleted." (i kad je
+	// n=0 uz izlazni kod 1). Broji se n, ne prisutnost riječi "deleted" —
+	// inače bi "0 ... deleted" lažno javilo uspjeh.
+	killed := false
+	if m := reConntrackDeleted.FindStringSubmatch(string(out)); m != nil && m[1] != "0" {
+		killed = true
+	}
+	if !killed {
 		writeJSON(w, http.StatusOK, map[string]any{"killed": false,
 			"detail": "veza više ne postoji ili je već zatvorena"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"killed": true})
 }
+
+var reConntrackDeleted = regexp.MustCompile(`(\d+) flow entries have been deleted`)
 
 func (s *server) handleDiagLookup(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -192,6 +207,7 @@ func (s *server) handleDiagLookup(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) {
 		return
 	}
+	in.Name = strings.TrimSpace(in.Name)
 	if !validHostArg(in.Name) {
 		writeErr(w, http.StatusBadRequest, "neispravno ime ili adresa")
 		return

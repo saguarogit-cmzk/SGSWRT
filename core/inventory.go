@@ -470,7 +470,11 @@ func (s *server) handleHostWake(w http.ResponseWriter, r *http.Request) {
 // globalni broadcast, da dosegne host bez obzira na kojem je segmentu (VLAN-u).
 // Vraća broj odredišta na koja je paket poslan.
 func wolSend(mac net.HardwareAddr) (int, error) {
-	// magic packet: 6× 0xFF, pa 16× MAC adresa (ukupno 102 bajta)
+	// magic packet je 6× 0xFF + 16× MAC (102 bajta) i vrijedi samo za 6-bajtne
+	// MAC adrese; net.ParseMAC prihvaća i 8/20 bajtova pa se to ovdje odbija
+	if len(mac) != 6 {
+		return 0, fmt.Errorf("MAC adresa mora imati 6 bajtova")
+	}
 	packet := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 	for i := 0; i < 16; i++ {
 		packet = append(packet, mac...)
