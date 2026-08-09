@@ -2541,23 +2541,24 @@ function backupRow(b, actions) {
    tooltipu), a ispod tablice stoji legenda. Tako red stane u jedan pogled
    umjesto da ga zauzmu četiri gumba s tekstom. */
 
+// radnje u redovima — SVG umjesto emojija (paths se crtaju kroz svgMarkup)
 const ROW_ICONS = {
-  "Uredi": "✎",
-  "Obriši": "🗑",
-  "Ukloni": "🗑",
-  "Pristup": "🔑",
-  "Ukloni lozinku": "⛔",
-  "Preuzmi": "⤓",
-  "Pošalji mailom": "✉",
-  "Preuzmi .ovpn": "⤓",
-  "Preuzmi .conf": "⤓",
-  "Prikaži": "👁",
-  "Vrati": "↺",
-  "U rezervacije": "📌",
-  "Gore": "▲",
-  "Dolje": "▼",
-  "Probudi": "⏻",
-  "Prekini": "✕",
+  "Uredi": '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  "Obriši": '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+  "Ukloni": '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+  "Pristup": '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 3l3 3M15 5l2 2"/>',
+  "Ukloni lozinku": '<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>',
+  "Preuzmi": '<path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/>',
+  "Pošalji mailom": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  "Preuzmi .ovpn": '<path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/>',
+  "Preuzmi .conf": '<path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/>',
+  "Prikaži": '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  "Vrati": '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+  "U rezervacije": '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/>',
+  "Gore": '<path d="m6 15 6-6 6 6"/>',
+  "Dolje": '<path d="m6 9 6 6 6-6"/>',
+  "Probudi": '<path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>',
+  "Prekini": '<path d="M18 6 6 18M6 6l12 12"/>',
 };
 
 function btnSm(label, danger, onclick) {
@@ -2566,7 +2567,7 @@ function btnSm(label, danger, onclick) {
   const icon = ROW_ICONS[label];
   if (icon) {
     b.classList.add("btn-ico");
-    b.textContent = icon;
+    b.innerHTML = svgMarkup(icon);
     b.title = label;
     b.setAttribute("aria-label", label);
   } else {
@@ -2918,6 +2919,58 @@ const NAV_GROUPS = [
   ["VPN", ["wireguard", "wgsite", "openvpn"]],
   ["System", ["settings", "users", "logs", "backup", "devices", "reports", "update", "help"]],
 ];
+// SVG ikone (Feather/Lucide stil): tanke linije u boji sučelja (currentColor),
+// iste na svakom uređaju i u obje teme — za razliku od emojija.
+const svgMarkup = (paths) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ` +
+  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
+// ikona po modulu (lijevi izbornik)
+const MODULE_ICONS = {
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  monitorx: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+  diag: '<circle cx="11" cy="11" r="6"/><path d="m20 20-3.5-3.5"/>',
+  ups: '<rect x="3" y="8" width="15" height="10" rx="2"/><path d="M18 11h2v4h-2"/><path d="M10 10l-2 4h3l-2 4"/>',
+  alerts: '<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+  audit: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+  network: '<rect x="3" y="9" width="18" height="10" rx="2"/><path d="M7 9V6h10v3M8 19v2M16 19v2M12 19v2"/>',
+  wan: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+  multiwan: '<circle cx="12" cy="19" r="2"/><path d="M12 17V9M12 9 6 5M12 9l6-4"/><circle cx="6" cy="4" r="1.6"/><circle cx="18" cy="4" r="1.6"/>',
+  dhcp: '<rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 14V9a5 5 0 0 1 10 0v5M12 4v3"/>',
+  dns: '<path d="M5 4a2 2 0 0 1 2-2h11v20H7a2 2 0 0 1-2-2z"/><path d="M9 7h6M9 11h6"/>',
+  routes: '<path d="M4 7h9a4 4 0 0 1 4 4v6"/><path d="m14 4 3 3-3 3"/><path d="m10 20-3-3 3-3"/><path d="M20 17h-9"/>',
+  ospf: '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h5M12 12l5-5M12 12l5 5"/>',
+  qos: '<path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l4-4"/><circle cx="12" cy="15" r="1.2"/>',
+  firewall: '<path d="M12 3 4 6v5c0 4 3.4 7.4 8 9 4.6-1.6 8-5 8-9V6z"/><path d="M9 12h6"/>',
+  publish: '<path d="M4 8h13l-3-3m3 3-3 3M20 16H7l3-3m-3 3 3 3"/>',
+  hardening: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="m10.3 15 1.3 1.3 2.3-2.4"/>',
+  protection: '<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>',
+  scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M4 12h16"/>',
+  rproxy: '<path d="M3 7h6M3 12h5M3 17h6"/><path d="M8 12l6-5v10z"/><path d="M14 12h7"/>',
+  wireguard: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.3"/>',
+  wgsite: '<rect x="2" y="8" width="7" height="8" rx="1.5"/><rect x="15" y="8" width="7" height="8" rx="1.5"/><path d="M9 12h6"/><path d="M12 10.5v3"/>',
+  openvpn: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9l3-2 3 2M9 15l3 2 3-2"/>',
+  devices: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/>',
+  backup: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  update: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
+  reports: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 15v-3M12 15V9M16 15v-5"/>',
+  settings: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 6a3 3 0 0 1 0 6M21 20c0-2.5-1.8-4.2-4-4.7"/>',
+  logs: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .9-1 1.7M12 17h.01"/>',
+  _default: '<circle cx="12" cy="12" r="9"/>',
+};
+// ikona po skupini (gornja traka) — pomaže brzom snalaženju
+const GROUP_ICONS = {
+  Status: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+  Network: '<rect x="3" y="9" width="18" height="10" rx="2"/><path d="M7 9V6h10v3"/>',
+  Firewall: '<path d="M12 3 4 6v5c0 4 3.4 7.4 8 9 4.6-1.6 8-5 8-9V6z"/>',
+  Filtering: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+  Proxy: '<path d="M4 8h13l-3-3m3 3-3 3M20 16H7l3-3m-3 3 3 3"/>',
+  VPN: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  System: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
+};
+
 // uloga prijavljenog korisnika; postavlja se pri pokretanju iz /auth/session
 let myRole = "admin";
 let myRoleLabel = "";
@@ -2940,7 +2993,10 @@ function renderNav(active) {
   NAV_GROUPS.forEach((g, i) => {
     const b = document.createElement("button");
     b.className = "nav-cat" + (i === gi ? " active" : "");
-    b.textContent = g[0];
+    const gic = document.createElement("span");
+    gic.className = "nav-ico";
+    gic.innerHTML = svgMarkup(GROUP_ICONS[g[0]] || MODULE_ICONS._default);
+    b.append(gic, document.createTextNode(g[0]));
     b.onclick = () => {
       const vis = visibleModules(g[1]);
       const target = lastByGroup[i] && vis.includes(lastByGroup[i])
@@ -2956,7 +3012,10 @@ function renderNav(active) {
   for (const id of visibleModules(NAV_GROUPS[gi][1])) {
     const b = document.createElement("button");
     b.className = "subtab" + (id === active ? " active" : "");
-    b.textContent = MODULES[id][0];
+    const mic = document.createElement("span");
+    mic.className = "nav-ico";
+    mic.innerHTML = svgMarkup(MODULE_ICONS[id] || MODULE_ICONS._default);
+    b.append(mic, document.createTextNode(MODULES[id][0]));
     b.title = MODULES[id][1];
     b.onclick = () => { location.hash = "#/" + id; };
     sub.append(b);
