@@ -74,6 +74,20 @@ CREATE TABLE IF NOT EXISTS dns_split (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- uvjetno prosljeđivanje: upiti za internu domenu idu na zadani DNS
+-- poslužitelj (npr. Windows/AD DNS), ostalo ide vanjskim poslužiteljima.
+-- Zapisuje se kao dnsmasq server=/domena/dns-ip (za razliku od split DNS-a
+-- koji je address=/domena/ip).
+CREATE TABLE IF NOT EXISTS dns_forward (
+    uuid        TEXT PRIMARY KEY,
+    domain      TEXT NOT NULL UNIQUE,
+    dns_ip      TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    notes       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- WireGuard peerovi; privatni ključ postoji samo ako je par generiran na
 -- uređaju (omogućuje export klijentskog configa), inače je peer donio svoj javni
 CREATE TABLE IF NOT EXISTS wg_peers (

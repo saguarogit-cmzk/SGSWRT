@@ -504,8 +504,36 @@ async function loadDns() {
   // je prije bilo u zasebnom modulu.
   loadUpstream().catch(alertErr);
   loadProtection().catch(alertErr);
-  const [st, rc, sp] = await Promise.all([
-    api("/dns/status"), api("/dns/records"), api("/dns/split")]);
+  const [st, rc, sp, fw] = await Promise.all([
+    api("/dns/status"), api("/dns/records"), api("/dns/split"), api("/dns/forward")]);
+
+  const fwb = $("fwd-rows");
+  fwb.replaceChildren();
+  for (const x of fw.forward) {
+    const tr = document.createElement("tr");
+    for (const v of [x.domain, x.dns_ip]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.append(td);
+    }
+    const tdE = document.createElement("td");
+    tdE.append(tick(!!x.enabled, null));
+    tr.append(tdE);
+    const tdN = document.createElement("td");
+    tdN.textContent = x.notes || "—";
+    tr.append(tdN);
+    const tdAct = document.createElement("td");
+    tdAct.className = "row-actions";
+    tdAct.append(
+      btnSm("Uredi", false, () => openFwdDialog(x)),
+      btnSm("Obriši", true, async () => {
+        if (!confirm(`Obrisati uvjetno prosljeđivanje za "${x.domain}"?`)) return;
+        await api("/dns/forward/" + x.uuid, "DELETE").catch(alertErr);
+        loadDns().catch(alertErr);
+      }));
+    tr.append(tdAct);
+    fwb.append(tr);
+  }
 
   const spb = $("sp-rows");
   spb.replaceChildren();
@@ -610,6 +638,19 @@ function openSpDialog(x) {
   f.elements.notes.value = x ? x.notes || "" : "";
   f.elements.enabled.checked = x ? !!x.enabled : true;
   $("sp-dialog").showModal();
+}
+
+let editFwdUUID = null;
+function openFwdDialog(x) {
+  const f = $("fwd-form");
+  editFwdUUID = x ? x.uuid : null;
+  $("fwd-dialog-title").textContent = editFwdUUID
+    ? "Uredi uvjetno prosljeđivanje" : "Novo uvjetno prosljeđivanje";
+  f.elements.domain.value = x ? x.domain : "";
+  f.elements.dns_ip.value = x ? x.dns_ip : "";
+  f.elements.notes.value = x ? x.notes || "" : "";
+  f.elements.enabled.checked = x ? !!x.enabled : true;
+  $("fwd-dialog").showModal();
 }
 
 function openRecDialog(rec) {
@@ -2847,7 +2888,7 @@ const MODULE_KEYS = {
   ospf: "usmjeravanje rute routing dinamičko",
   qos: "brzina ograničenje prioritet promet",
   dhcp: "dodjela adresa rezervacije zakup lease raspon pool opseg gateway",
-  dns: "imena domene razlučivanje vanjski dns filtar odrasli obitelj blokada reklama adblock prisilni doh dot",
+  dns: "imena domene razlučivanje vanjski dns filtar odrasli obitelj blokada reklama adblock prisilni doh dot split uvjetno prosljeđivanje forward active directory ad windows microsoft conditional",
   firewall: "vatrozid pravila zone promet blokiraj dopusti",
   publish: "objava servera prosljeđivanje portova dmz nat",
   hardening: "očvršćivanje hardening pristup upravljanju sigurnost ssh acl",
@@ -3446,6 +3487,25 @@ $("sp-form").addEventListener("submit", async (ev) => {
     if (editSpUUID) await api("/dns/split/" + editSpUUID, "PUT", body);
     else await api("/dns/split", "POST", body);
     $("sp-dialog").close();
+    await loadDns();
+  } catch (e) { alertErr(e); }
+});
+
+$("fwd-add").addEventListener("click", () => openFwdDialog(null));
+$("fwd-cancel").addEventListener("click", () => $("fwd-dialog").close());
+$("fwd-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const body = {
+    domain: f.elements.domain.value.trim(),
+    dns_ip: f.elements.dns_ip.value.trim(),
+    notes: f.elements.notes.value.trim(),
+    enabled: f.elements.enabled.checked,
+  };
+  try {
+    if (editFwdUUID) await api("/dns/forward/" + editFwdUUID, "PUT", body);
+    else await api("/dns/forward", "POST", body);
+    $("fwd-dialog").close();
     await loadDns();
   } catch (e) { alertErr(e); }
 });

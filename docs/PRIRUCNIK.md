@@ -387,6 +387,25 @@ ponuđenih lista ne pokriva sadržaj za odrasle — za to je jednostavnije uzeti
 obiteljski DNS gore, a lista dolazi u obzir kad podaci moraju ostati na
 uređaju. Velike liste troše memoriju, pa provjeri veličinu prije upotrebe.
 
+### Uvjetno prosljeđivanje — rad s Windows/AD domenom
+
+Kad tvrtka već ima domenu na Windows/Active Directory DNS-u, Saguaro ne mora
+biti izoliran: upiti za **internu domenu** idu na taj DNS, a **sve ostalo** i
+dalje razrješava Saguaro (pa vrijede adblock, prisilni DNS i obiteljski filtar).
+
+- Upiši domenu (npr. `tvrtka.local`) i IP domenskog DNS-a (npr. `192.168.50.10`).
+  Saguaro to zapiše kao dnsmasq `server=/tvrtka.local/192.168.50.10`.
+- Za pretragu **po imenu uređaja** (file share `\\server`, Exchange) dodaj i
+  **reverznu zonu** kao zaseban zapis: `50.168.192.in-addr.arpa` → isti DNS.
+- Klijentima u DHCP-u možeš objaviti i domenski sufiks (DHCP → po mreži).
+
+> **Razlika od Split DNS-a:** split (`address=/d/ip`) šalje *svako* ime u domeni
+> na jednu adresu; uvjetno prosljeđivanje (`server=/d/ip`) **pita drugi DNS
+> poslužitelj** koji vraća prave zapise. Za AD treba ovo drugo.
+
+Vrijedi nakon **Primijeni DNS**. Lista dijeli mjesto s vanjskim DNS-om, ali se
+ne sudaraju — Saguaro čuva tuđe zapise (D-011).
+
 ### Lokalna imena i ostalo
 
 - **Lokalni zapisi**: imena za uređaje u mreži (npr. `nas.lan` umjesto

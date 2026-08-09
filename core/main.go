@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.52.1"
+const version = "0.53.0"
 
 type server struct {
 	tokenMu       sync.RWMutex
@@ -244,6 +244,10 @@ func main() {
 	mux.Handle("DELETE /api/v1/dns/records/{uuid}", s.auth(s.handleDNSRecordDelete))
 	mux.Handle("POST /api/v1/dns/apply", s.auth(s.handleDNSApply))
 	mux.Handle("POST /api/v1/dns/dnssec", s.auth(s.handleDNSSECSet))
+	mux.Handle("GET /api/v1/dns/forward", s.auth(s.handleForwardList))
+	mux.Handle("POST /api/v1/dns/forward", s.auth(s.handleForwardCreate))
+	mux.Handle("PUT /api/v1/dns/forward/{uuid}", s.auth(s.handleForwardUpdate))
+	mux.Handle("DELETE /api/v1/dns/forward/{uuid}", s.auth(s.handleForwardDelete))
 	mux.Handle("GET /api/v1/dns/split", s.auth(s.handleSplitList))
 	mux.Handle("POST /api/v1/dns/split", s.auth(s.handleSplitCreate))
 	mux.Handle("PUT /api/v1/dns/split/{uuid}", s.auth(s.handleSplitUpdate))

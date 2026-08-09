@@ -316,6 +316,131 @@ func (s *server) handleSplitDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("uuid")})
 }
 
+/* ---------- uvjetno prosljeđivanje (interna domena -> DNS poslužitelj) ---------- */
+
+type ForwardRecord struct {
+	UUID    string `json:"uuid"`
+	Domain  string `json:"domain"`
+	DNSIP   string `json:"dns_ip"`
+	Enabled bool   `json:"enabled"`
+	Notes   string `json:"notes"`
+}
+
+const forwardCols = `uuid, domain, dns_ip, enabled, COALESCE(notes,'')`
+
+func scanForwardDNS(row interface{ Scan(...any) error }) (ForwardRecord, error) {
+	var x ForwardRecord
+	err := row.Scan(&x.UUID, &x.Domain, &x.DNSIP, &x.Enabled, &x.Notes)
+	return x, err
+}
+
+func validateForwardDNS(w http.ResponseWriter, x *ForwardRecord) bool {
+	x.Domain = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(x.Domain, "*.")))
+	x.DNSIP = strings.TrimSpace(x.DNSIP)
+	if !validDNSName(x.Domain) || !strings.Contains(x.Domain, ".") {
+		writeErr(w, http.StatusBadRequest,
+			"upiši domenu s točkom (npr. tvrtka.local)")
+		return false
+	}
+	ip := net.ParseIP(x.DNSIP)
+	if ip == nil {
+		writeErr(w, http.StatusBadRequest, "adresa DNS poslužitelja mora biti IP")
+		return false
+	}
+	x.DNSIP = ip.String()
+	return true
+}
+
+func (s *server) handleForwardList(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`SELECT ` + forwardCols + ` FROM dns_forward ORDER BY domain`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []ForwardRecord{}
+	for rows.Next() {
+		x, err := scanForwardDNS(rows)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out = append(out, x)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forward": out})
+}
+
+type forwardIn struct {
+	ForwardRecord
+	Enabled *bool `json:"enabled"`
+}
+
+func (s *server) handleForwardCreate(w http.ResponseWriter, r *http.Request) {
+	var in forwardIn
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	x := &in.ForwardRecord
+	if !validateForwardDNS(w, x) {
+		return
+	}
+	x.UUID = newUUID()
+	_, err := s.db.Exec(`INSERT INTO dns_forward (uuid, domain, dns_ip, enabled, notes)
+		VALUES (?,?,?,?,?)`, x.UUID, x.Domain, x.DNSIP, enabledIntOf(in.Enabled), x.Notes)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeErr(w, http.StatusConflict, "ta domena već ima uvjetno prosljeđivanje")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	xx, _ := scanForwardDNS(s.db.QueryRow(`SELECT `+forwardCols+` FROM dns_forward WHERE uuid=?`, x.UUID))
+	writeJSON(w, http.StatusCreated, xx)
+}
+
+func (s *server) handleForwardUpdate(w http.ResponseWriter, r *http.Request) {
+	uuid := r.PathValue("uuid")
+	var in forwardIn
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	x := &in.ForwardRecord
+	if !validateForwardDNS(w, x) {
+		return
+	}
+	res, err := s.db.Exec(`UPDATE dns_forward SET domain=?, dns_ip=?, enabled=?, notes=?,
+		updated_at=datetime('now') WHERE uuid=?`,
+		x.Domain, x.DNSIP, enabledIntOf(in.Enabled), x.Notes, uuid)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeErr(w, http.StatusConflict, "ta domena već ima uvjetno prosljeđivanje")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeErr(w, http.StatusNotFound, "zapis ne postoji")
+		return
+	}
+	xx, _ := scanForwardDNS(s.db.QueryRow(`SELECT `+forwardCols+` FROM dns_forward WHERE uuid=?`, uuid))
+	writeJSON(w, http.StatusOK, xx)
+}
+
+func (s *server) handleForwardDelete(w http.ResponseWriter, r *http.Request) {
+	res, err := s.db.Exec(`DELETE FROM dns_forward WHERE uuid=?`, r.PathValue("uuid"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeErr(w, http.StatusNotFound, "zapis ne postoji")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("uuid")})
+}
+
 /* ---------- status ---------- */
 
 type dnsEntry struct {
@@ -582,6 +707,53 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(&batch, "add_list dhcp.%s.address=%s\n", dnsmasqSect, uciQuote(a))
 		}
 	}
+
+	// uvjetno prosljeđivanje: server=/domena/dns-ip u dnsmasq server listi. Ta
+	// lista je zajednička s vanjskim DNS-om (dnsupstream.go), pa se rebuilda
+	// pažljivo: čuvaju se svi tuđi zapisi (vanjski poslužitelji bez '/' i ručni
+	// /…/ unosi), uklanjaju samo oni koje smo mi prošli put upisali (D-011).
+	fwdRows, err := s.db.Query(`SELECT domain, dns_ip FROM dns_forward
+		WHERE enabled = 1 ORDER BY domain`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fwdWant := []string{}
+	for fwdRows.Next() {
+		var d, ip string
+		if err := fwdRows.Scan(&d, &ip); err != nil {
+			fwdRows.Close()
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		fwdWant = append(fwdWant, "/"+d+"/"+ip)
+	}
+	fwdRows.Close()
+
+	if dnsmasqSect != "" {
+		var prev []string
+		json.Unmarshal([]byte(s.getSetting("dns_forward_applied", "[]")), &prev)
+		ours := map[string]bool{}
+		for _, p := range prev {
+			ours[p] = true
+		}
+		for _, wnt := range fwdWant {
+			ours[wnt] = true
+		}
+		keep := []string{}
+		for _, v := range sectList(cfg[dnsmasqSect], "server") {
+			if !ours[v] {
+				keep = append(keep, v) // vanjski DNS i tuđi /…/ unosi ostaju
+			}
+		}
+		final := append(keep, fwdWant...)
+		if len(sectList(cfg[dnsmasqSect], "server")) > 0 {
+			fmt.Fprintf(&batch, "delete dhcp.%s.server\n", dnsmasqSect)
+		}
+		for _, v := range final {
+			fmt.Fprintf(&batch, "add_list dhcp.%s.server=%s\n", dnsmasqSect, uciQuote(v))
+		}
+	}
 	batch.WriteString("commit dhcp\n")
 
 	if err := uciBatch(ctx, batch.String()); err != nil {
@@ -591,17 +763,20 @@ func (s *server) handleDNSApply(w http.ResponseWriter, r *http.Request) {
 	if dnsmasqSect != "" {
 		b, _ := json.Marshal(want)
 		s.setSetting("dns_split_applied", string(b))
+		fb, _ := json.Marshal(fwdWant)
+		s.setSetting("dns_forward_applied", string(fb))
 	}
-	// promjena address= zapisa traži restart, reload nije dovoljan
+	// promjena address=/server= zapisa traži restart, reload nije dovoljan
 	if err := serviceReload(ctx, "dnsmasq", "restart"); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"applied":       len(recs),
-		"applied_split": len(want),
-		"removed":       removed,
-		"backup":        backupName,
+		"applied":         len(recs),
+		"applied_split":   len(want),
+		"applied_forward": len(fwdWant),
+		"removed":         removed,
+		"backup":          backupName,
 	})
 }

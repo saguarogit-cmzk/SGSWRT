@@ -461,6 +461,34 @@
       <p class="hint">Vrijedi za sve koji koriste ovaj uređaj kao DNS. Uređaji u
         VLAN-ovima uz ovo trebaju i firewall dopuštenje prema serveru.</p>
     </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Uvjetno prosljeđivanje — interna domena na drugi DNS</h2>
+        <button id="fwd-add" class="primary">Dodaj domenu</button>
+      </div>
+      <p class="hint">Za rad s postojećom domenom (npr. <b>Windows/Active
+        Directory</b>): upiti za internu domenu idu na taj DNS poslužitelj, a
+        <b>sve ostalo</b> i dalje razrješava ovaj uređaj (pa vrijede adblock,
+        prisilni DNS i filtar sadržaja). Npr. <code>tvrtka.local</code> →
+        <code>192.168.50.10</code> (domenski kontroler). Za pristup po adresi
+        (file share, Exchange) dodaj i <b>reverznu zonu</b>, npr.
+        <code>50.168.192.in-addr.arpa</code> → isti DNS.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Domena</th><th>DNS poslužitelj</th><th>Aktivno</th>
+            <th>Napomene</th><th></th>
+          </tr></thead>
+          <tbody id="fwd-rows"></tbody>
+        </table>
+      </div>
+      <p class="legend">✔ uključeno · ☐ isključeno · ✎ uredi · 🗑 obriši</p>
+      <p class="hint">Razlika od Split DNS-a: ondje <i>sve</i> ime u domeni ide na
+        jednu adresu; ovdje se domena <b>pita drugi DNS poslužitelj</b> (koji
+        onda vraća prave zapise). Vrijedi nakon <b>Primijeni DNS</b>.</p>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <h2>DNS poslužitelj</h2>
@@ -3246,6 +3274,26 @@
         (npr. <code>mail.tvrtka.hr</code>) kao zaseban zapis.</p>
       <div class="form-actions">
         <button type="button" class="ghost" id="sp-cancel">Odustani</button>
+        <button type="submit" class="primary">Spremi</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="fwd-dialog">
+    <form id="fwd-form">
+      <h2 id="fwd-dialog-title">Uvjetno prosljeđivanje</h2>
+      <div class="form-grid">
+        <label>Domena<input name="domain" required placeholder="tvrtka.local"></label>
+        <label>DNS poslužitelj (IP)<input name="dns_ip" required placeholder="192.168.50.10"></label>
+        <label class="wide">Napomene<textarea name="notes" rows="2"></textarea></label>
+        <label class="check"><input type="checkbox" name="enabled" checked>
+          Aktivno — uključi u primjenu</label>
+      </div>
+      <p class="hint">Upiši internu domenu (npr. AD domenu) i IP DNS poslužitelja
+        koji je razrješava. Za pretragu po imenu uređaja dodaj i reverznu zonu
+        (<code>x.x.x.in-addr.arpa</code>) kao zaseban zapis prema istom DNS-u.</p>
+      <div class="form-actions">
+        <button type="button" class="ghost" id="fwd-cancel">Odustani</button>
         <button type="submit" class="primary">Spremi</button>
       </div>
     </form>
