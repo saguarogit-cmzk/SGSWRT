@@ -23,6 +23,12 @@ import (
 const githubRepo = "saguarogit-cmzk/SGSWRT"
 const updateMaxBytes = 100 << 20
 
+// isUpdateAsset prepoznaje paket za nadogradnju u izdanju — mora biti .tar.gz
+// za linux-amd64, ne .sha256 (koji uz njega stoji i sadrži samo otisak).
+func isUpdateAsset(name string) bool {
+	return strings.Contains(name, "linux-amd64") && strings.HasSuffix(name, ".tar.gz")
+}
+
 func (s *server) stagedUpdatePath() string {
 	return filepath.Join(s.dataDir, "update-staged.tar.gz")
 }
@@ -80,7 +86,7 @@ func (s *server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			"tag": rel.TagName, "published_at": rel.PublishedAt,
 		}
 		for _, a := range rel.Assets {
-			if strings.Contains(a.Name, "linux-amd64") {
+			if isUpdateAsset(a.Name) {
 				latest["asset"] = a.Name
 				latest["size_bytes"] = a.Size
 				break
@@ -229,7 +235,7 @@ func (s *server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		}
 		url := ""
 		for _, a := range rel.Assets {
-			if strings.Contains(a.Name, "linux-amd64") {
+			if isUpdateAsset(a.Name) {
 				url = a.URL
 				break
 			}
