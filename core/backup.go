@@ -52,6 +52,13 @@ func (s *server) createFullBackup(ctx context.Context) (string, int64, error) {
 		return "", 0, fmt.Errorf("sysupgrade -b: %v: %s", bErr, out)
 	}
 
+	// popis izričito instaliranih paketa ide u arhivu (dio etcDir-a): bez toga
+	// vraćanje na čist uređaj vrati konfiguraciju za pakete koji nisu
+	// instalirani (nut, haproxy, conntrack…). Nakon vraćanja se doinstaliraju
+	// kroz Updates → provjeri pakete. Osvježava se pri svakom backupu.
+	_ = os.WriteFile(s.owPackagesFile(),
+		[]byte(strings.Join(worldPackages(), "\n")+"\n"), 0o644)
+
 	// konzistentan snapshot žive SQLite baze
 	dbSnap := filepath.Join(tmp, "saguaro.db")
 	if _, err := s.db.Exec("VACUUM INTO '" +

@@ -435,3 +435,84 @@ func (s *server) handleHostDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": r.PathValue("uuid")})
 }
+
+// handleHostWake pošalje Wake-on-LAN "magic packet" hostu iz inventara. Host
+// mora imati Wake-on-LAN uključen u BIOS-u/mrežnoj kartici i biti spojen (makar
+// ugašen) na istu mrežu. Radi izravno iz Go-a — nije potreban vanjski alat.
+func (s *server) handleHostWake(w http.ResponseWriter, r *http.Request) {
+	var mac string
+	err := s.db.QueryRow(`SELECT mac FROM hosts WHERE uuid=?`,
+		r.PathValue("uuid")).Scan(&mac)
+	if err == sql.ErrNoRows {
+		writeErr(w, http.StatusNotFound, "host ne postoji")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	hw, err := net.ParseMAC(mac)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "host nema ispravnu MAC adresu")
+		return
+	}
+	sent, err := wolSend(hw)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "slanje: "+err.Error())
+		return
+	}
+	addEvent(s, "info", "Wake-on-LAN poslan uređaju "+mac)
+	writeJSON(w, http.StatusOK, map[string]any{"sent": true, "targets": sent})
+}
+
+// wolSend sastavi magic packet (6×0xFF + 16× MAC) i pošalje ga kao UDP
+// broadcast na port 9. Šalje na sve broadcast adrese lokalnih IPv4 mreža i na
+// globalni broadcast, da dosegne host bez obzira na kojem je segmentu (VLAN-u).
+// Vraća broj odredišta na koja je paket poslan.
+func wolSend(mac net.HardwareAddr) (int, error) {
+	// magic packet: 6× 0xFF, pa 16× MAC adresa (ukupno 102 bajta)
+	packet := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+	for i := 0; i < 16; i++ {
+		packet = append(packet, mac...)
+	}
+
+	targets := map[string]bool{"255.255.255.255": true}
+	// broadcast adresa svake lokalne IPv4 mreže (da dosegne i VLAN-ove)
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, ifi := range ifaces {
+			if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagBroadcast == 0 {
+				continue
+			}
+			addrs, _ := ifi.Addrs()
+			for _, a := range addrs {
+				ipnet, ok := a.(*net.IPNet)
+				if !ok || ipnet.IP.To4() == nil {
+					continue
+				}
+				ip4 := ipnet.IP.To4()
+				mask := ipnet.Mask
+				bc := make(net.IP, 4)
+				for i := 0; i < 4; i++ {
+					bc[i] = ip4[i] | ^mask[i]
+				}
+				targets[bc.String()] = true
+			}
+		}
+	}
+
+	n := 0
+	for dst := range targets {
+		conn, err := net.Dial("udp", dst+":9")
+		if err != nil {
+			continue
+		}
+		if _, err := conn.Write(packet); err == nil {
+			n++
+		}
+		conn.Close()
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("nijedan broadcast nije dostupan")
+	}
+	return n, nil
+}

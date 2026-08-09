@@ -438,6 +438,13 @@ async function loadDhcp() {
     const tdAct = document.createElement("td");
     tdAct.className = "row-actions";
     tdAct.append(
+      btnSm("Probudi", false, async () => {
+        try {
+          const r = await api("/inventory/hosts/" + h.uuid + "/wake", "POST", {});
+          setNote("dhcp-sync-info", "Wake-on-LAN poslan (" +
+            (h.hostname || h.mac) + ", " + r.targets + " mreža)");
+        } catch (e) { alertErr(e); }
+      }),
       btnSm("Uredi", false, () => openHostDialog(h)),
       btnSm("Obriši", true, async () => {
         if (!confirm(`Obrisati host "${h.hostname || h.mac}"?`)) return;
@@ -2508,6 +2515,8 @@ const ROW_ICONS = {
   "U rezervacije": "📌",
   "Gore": "▲",
   "Dolje": "▼",
+  "Probudi": "⏻",
+  "Prekini": "✕",
 };
 
 function btnSm(label, danger, onclick) {

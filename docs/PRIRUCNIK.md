@@ -324,6 +324,11 @@ ne dijele. Za svaki raspon se postavlja:
 - **Rezervacije**: uređaj s upisanim MAC-om uvijek dobiva istu adresu. Dodaju
   se ručno ili gumbom *U rezervacije* kod aktivnog leasea. Primjenjuju se
   gumbom *Primijeni rezervacije*.
+- **Probudi (Wake-on-LAN)**: gumb uz svaki host pošalje „magic packet" i
+  probudi ugašeno računalo — korisno za server ili radnu stanicu koju treba
+  upaliti izdaleka. Host mora imati WoL uključen u BIOS-u/mrežnoj kartici i biti
+  spojen (makar ugašen) na mrežu. Ne treba dodatni alat; paket ide na sve
+  lokalne mreže (i VLAN-ove).
 - **Aktivni leaseovi**: što je uređaj stvarno izdao. Prazan popis uz uključen
   raspon znači da dijeljenje ne radi — pogledaj stupac Stanje gore.
 
@@ -702,8 +707,12 @@ na vanjski syslog poslužitelj (kartica ispod).
 
 ## Backup
 
-- **Puni backup** = OpenWrt konfiguracija + Saguaro baza + certifikati i token,
-  u jednoj tar.gz arhivi. Čuva se zadnjih 10 na uređaju.
+- **Puni backup** = OpenWrt konfiguracija + Saguaro baza + certifikati i token
+  + **popis instaliranih paketa**, u jednoj tar.gz arhivi. Čuva se zadnjih 10
+  na uređaju. Popis paketa (`packages.list`) osvježava se pri svakom backupu,
+  pa vraćanje na **čist uređaj** nije nepotpuno: nakon vraćanja se u
+  *Updates → provjeri pakete* doinstaliraju paketi kojih na novom uređaju nema
+  (nut, haproxy, conntrack i drugi koji se inače instaliraju na klik).
 - **Slanje izvan uređaja**: svaka nova arhiva automatski ide na tvoj server ili
   NAS preko SCP-a. Backup koji leži samo na uređaju nije backup.
   - Prijava ide **SSH ključem** koji uređaj sam napravi; njegov javni dio treba
