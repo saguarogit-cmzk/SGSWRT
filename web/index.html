@@ -1973,6 +1973,11 @@
         Uređaj provjerava ima li novo izdanje na GitHubu; nadogradnja se može
         i ručno učitati kao paket. Prije svake nadogradnje automatski se radi
         puni backup, pa se u slučaju problema stanje vrati kroz Backup modul.
+        Nadogradnju smije pokrenuti <b>samo administrator</b>.
+        <br><br>Uz svaki paket izdanje objavljuje i <b>otisak (SHA-256)</b>.
+        Kod nadogradnje s GitHuba uređaj ga preuzme i usporedi s paketom
+        <b>prije raspakiravanja</b> — ako se ne poklapa (oštećen ili podmetnut
+        paket), nadogradnja se odbija.
       </div></details>
 
       <details class="help"><summary>Nadzor — praćenje i događaji</summary><div>
@@ -2069,10 +2074,15 @@
       <details class="help"><summary>Users — korisnici i uloge</summary><div>
         Više ljudi može imati vlastiti račun s ulogom: <b>Administrator</b> (sve,
         uključivo korisnike i nepovratne zahvate), <b>Operater</b> (svakodnevni
-        rad, bez upravljanja korisnicima) i <b>Pregled</b> (samo gledanje). Zadnji
+        rad, bez upravljanja korisnicima) i <b>Pregled</b> (gledanje). Zadnji
         administrator se ne može obrisati ni isključiti, da uređaj ne ostane bez
         gospodara. Svaki korisnik mijenja svoju lozinku i uključuje svoju
         dvofaktorsku prijavu.
+        <br><br><b>Pregled ne preuzima tajne:</b> iako smije gledati, zatvorene
+        su mu <b>VPN konfiguracije</b> (imaju privatni ključ), <b>backup arhive</b>
+        (ključevi, token, lozinke) i <b>snimke prometa</b> — te lozinka za
+        dijeljenje UPS-a. Tako račun dan samo za pregled ne može povući radni
+        VPN pristup u mrežu. Te radnje ostaju operateru i administratoru.
       </div></details>
 
       <details class="help"><summary>Dvofaktorska prijava (2FA)</summary><div>
