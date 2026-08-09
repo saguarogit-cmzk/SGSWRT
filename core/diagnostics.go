@@ -185,6 +185,9 @@ func (s *server) handleConnections(w http.ResponseWriter, r *http.Request) {
 		"total_in":    totalIn,
 		"unreplied":   unreplied,
 		"conns_total": totalConns,
+		// je li dostupan alat za prekid veze (conntrack); GUI prema tome
+		// pokazuje gumb za prekid ili ponudu instalacije
+		"kill_available": conntrackInstalled(),
 		// Više od 40 % veza bez ijednog paketa natrag nije normalno stanje
 		// mreže — tada uređaj gotovo sigurno vidi samo jedan smjer prometa i
 		// sve brojke ovdje treba čitati s tim na umu.

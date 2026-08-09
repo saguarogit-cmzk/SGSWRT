@@ -961,6 +961,8 @@ Provjere koje su se prije radile preko SSH-a, sada iz sučelja:
 - **Ping** — dostupnost i vrijeme odziva (4 paketa).
 - **Traceroute** — put do odredišta, skok po skok (do 20 skokova).
 - **DNS lookup** — u što se ime razlučuje (nslookup).
+- **Provjera porta** — je li TCP port na hostu otvoren, zatvoren (veza odbijena)
+  ili filtriran (nema odgovora). Radi izravno iz Saguara, bez dodatnog alata.
 - **Susjedi (ARP / NDP)** — tablica uređaja koje jezgra vidi na izravno
   spojenim mrežama: adresa, MAC, sučelje i stanje; ime se pridruži iz DHCP
   leaseova. Za IPv4 je to ARP, za IPv6 NDP.
@@ -977,6 +979,11 @@ su pojedinačne veze s filterom (adresa, port ili ime); prikazuje se prvih 200.
 
 Brojke su promet **trenutno otvorenih veza**, ne povijest — za mjesečnu
 potrošnju služi Monitoring (nlbwmon).
+
+Uz svaku vezu stoji i **Prekini** — prekida točno tu vezu (po izvoru,
+odredištu i portovima). Traži alat `conntrack`, koji se instalira jednim
+klikom kad prvi put zatreba. Korisno za zombi-veze ili da se odmah prekine
+sumnjiva veza dok se ne posloži pravilo.
 
 ### Snimanje prometa (.pcap)
 

@@ -5529,6 +5529,7 @@ $("uspw-form").addEventListener("submit", async (ev) => {
 /* ---------- dijagnostika: aktivne veze i snimanje prometa ---------- */
 
 let diagConns = [];
+let killAvailable = false;
 
 function fmtLeft(s) {
   if (s >= 3600) return Math.floor(s / 3600) + " h";
@@ -5562,6 +5563,17 @@ function renderConnRows() {
       td.textContent = v;
       tr.append(td);
     }
+    const tdK = document.createElement("td");
+    tdK.className = "row-actions";
+    if (killAvailable) {
+      tdK.append(btnSm("Prekini", true, async () => {
+        await api("/diag/conn/kill", "POST", {
+          proto: c.proto, src: c.src, dst: c.dst, sport: c.sport, dport: c.dport,
+        }).catch(alertErr);
+        loadDiag().catch(alertErr);
+      }));
+    }
+    tr.append(tdK);
     tb.append(tr);
   }
   setNote("cn-conn-note", shown > 200
@@ -5573,6 +5585,8 @@ async function loadDiag() {
   loadNeighbors().catch(() => setNote("nb-note", "nedostupno"));
   const x = await api("/connections");
   diagConns = x.connections || [];
+  killAvailable = !!x.kill_available;
+  $("cn-kill-install-wrap").classList.toggle("hidden", killAvailable);
 
   const tb = $("cn-devs");
   tb.replaceChildren();
@@ -5655,6 +5669,36 @@ async function loadNeighbors() {
   setNote("nb-note", (x.neighbors || []).length + " susjeda");
 }
 $("nb-refresh").addEventListener("click", () => loadNeighbors().catch(alertErr));
+
+$("pc-check").addEventListener("click", async () => {
+  const host = $("pc-host").value.trim();
+  const port = parseInt($("pc-port").value, 10);
+  if (!host || !port) { $("pc-result").textContent = "Upiši host i port."; return; }
+  $("pc-result").textContent = "Provjeravam " + host + ":" + port + " …";
+  try {
+    const r = await api("/diag/portcheck", "POST", { host, port });
+    $("pc-result").textContent = (r.open ? "✓ " : "✕ ") + r.detail +
+      " (" + r.ms + " ms)";
+  } catch (e) {
+    $("pc-result").textContent = "Greška: " + (e.message || e);
+  }
+});
+$("pc-port").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); $("pc-check").click(); }
+});
+
+$("cn-kill-install").addEventListener("click", async () => {
+  $("cn-kill-install").disabled = true;
+  setNote("cn-conn-note", "instaliram conntrack…");
+  try {
+    await api("/diag/conn/install", "POST", {});
+    await loadDiag();
+  } catch (e) {
+    setNote("cn-conn-note", "greška: " + (e.message || e));
+  } finally {
+    $("cn-kill-install").disabled = false;
+  }
+});
 $("cn-filter").addEventListener("input", renderConnRows);
 
 async function loadCapture() {

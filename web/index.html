@@ -1999,10 +1999,11 @@
       </div></details>
 
       <details class="help"><summary>Diagnostics — mrežni alati, tko troši vezu i snimanje prometa</summary><div>
-        <b>Mrežni alati</b>: ping, traceroute i DNS lookup s uređaja (bez
-        SSH-a) — upišeš adresu ili ime hosta i odabereš alat. <b>Susjedi
-        (ARP/NDP)</b>: uređaji koje jezgra vidi na izravno spojenim mrežama
-        (adresa, MAC, sučelje, stanje), s imenom iz DHCP leaseova.
+        <b>Mrežni alati</b>: ping, traceroute, DNS lookup i provjera je li TCP
+        port otvoren — s uređaja, bez SSH-a. <b>Susjedi (ARP/NDP)</b>: uređaji
+        koje jezgra vidi na izravno spojenim mrežama (adresa, MAC, sučelje,
+        stanje), s imenom iz DHCP leaseova. Uz svaku aktivnu vezu stoji i
+        <b>Prekini</b> (traži conntrack, instalira se na klik).
         <br><br><b>Tko troši vezu</b>: čita aktivne veze izravno iz jezgre
         (conntrack) — zbroj po uređaju u mreži, najveći promet na vrhu, pa puna
         tablica s filterom. Brojke su promet <b>trenutno otvorenih veza</b>, ne
@@ -2470,6 +2471,15 @@
         <button id="dt-lookup" class="ghost">DNS lookup</button>
       </div>
       <pre id="dt-out" class="hidden" style="font-size:11.5px;overflow-x:auto;background:#f6f8fa;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:340px;overflow-y:auto;white-space:pre-wrap"></pre>
+
+      <div class="form-grid wide-4" style="margin-top:10px">
+        <label>Provjera porta — host<input id="pc-host" placeholder="npr. 192.168.50.10" autocomplete="off"></label>
+        <label>Port<input id="pc-port" type="number" min="1" max="65535" placeholder="npr. 443"></label>
+      </div>
+      <div class="form-actions" style="justify-content:flex-start">
+        <button id="pc-check" class="ghost">Provjeri je li port otvoren</button>
+      </div>
+      <p class="hint" id="pc-result"></p>
     </section>
 
     <section class="card">
@@ -2521,11 +2531,14 @@
         <label class="stack-label" style="max-width:340px">Filter (adresa, port ili ime)
           <input id="cn-filter" placeholder="npr. 192.168.50.199 ili :443" autocomplete="off"></label>
       </div>
+      <div class="form-actions hidden" id="cn-kill-install-wrap" style="justify-content:flex-start">
+        <button id="cn-kill-install" class="ghost">Omogući prekid veza (conntrack)</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
             <th>Izvor</th><th>Odredište</th><th>Proto</th><th>Stanje</th>
-            <th>Poslano</th><th>Primljeno</th><th>Ističe za</th>
+            <th>Poslano</th><th>Primljeno</th><th>Ističe za</th><th></th>
           </tr></thead>
           <tbody id="cn-rows"></tbody>
         </table>
