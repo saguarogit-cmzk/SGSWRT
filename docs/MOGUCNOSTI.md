@@ -1,15 +1,21 @@
 # Saguaro Infrastructure — što sustav radi i što još može
 
-Analiza stanja na dan **08.08.2026.**, Saguaro Core **v0.47.0**, uređaj IN100
+Analiza stanja na dan **09.08.2026.**, Saguaro Core **v0.56.4**, uređaj IN100
 (OpenWrt 25.12.5, x86/64, Intel Atom E3845 · 4 jezgre · 8 GB RAM · 240 GB diska,
 4 mrežna porta 1 GbE, bez WiFi radija).
 
 > Popis „što sustav radi" (dio 1) pisan je oko v0.24 i pokriva tada postojeće
-> module. U međuvremenu su dodani (svi NAPRAVLJENO, vidi dio 3 i
+> module. U međuvremenu je dodano (svi NAPRAVLJENO, vidi dio 3 i
 > `docs/PRIRUCNIK.md`): Diagnostics, certifikat sučelja, korisnici i uloge, 2FA,
 > site-to-site, mjesečni izvještaj, filtriranje sadržaja i preslagan izbornik,
-> više raspona/DNS po mreži, te nadzor UPS-a. Aktualan popis modula je uvijek
-> `docs/PRIRUCNIK.md` (31 modul, 7 skupina).
+> više raspona/DNS po mreži, nadzor UPS-a (USB + mrežni/udaljeni NUT + Saguaro
+> kao NUT poslužitelj), **dnevnik firewalla s brojačima i redoslijedom pravila**,
+> **mrežni alati u Diagnosticsu** (ping/traceroute/DNS lookup/provjera porta/
+> susjedi/prekid veze), **Wake-on-LAN**, **ponovno pokretanje i gašenje iz
+> sučelja**, **nadzor svih servisa** (ne samo VPN-a), **uvjetno prosljeđivanje
+> DNS-a na Windows/AD DNS**, **SVG ikone**, popis paketa u backupu. Uz to
+> cjelovita sigurnosna revizija (v0.56.2–0.56.4). Aktualan popis modula je
+> uvijek `docs/PRIRUCNIK.md` (31 modul, 7 skupina).
 
 Dokument ima tri dijela:
 
@@ -157,7 +163,8 @@ paketa. Trud je procijenjen u danima rada.
 | **A6** | **mDNS preko VLAN-ova** | pisač ili Chromecast iz jedne mreže vidljiv u drugoj, bez spajanja mreža | `mdns-repeater` | 1 dan | srednja |
 | **A7** | **IGMP proxy** | operaterska IPTV kroz uređaj | `igmpproxy` | 1 dan | niska (samo ako ima IPTV) |
 | **A8** | **DHCP relay** | jedan DHCP server za više mreža | `odhcpd`/dnsmasq relay | 1 dan | niska |
-| **A9** | **Wake-on-LAN iz sučelja** | paljenje servera/računala na daljinu | `etherwake`, gumb uz uređaj u inventaru | 0,5 dana | niska, ali se lijepo pokazuje |
+| ~~A9~~ | **NAPRAVLJENO (v0.52.0)** — Wake-on-LAN iz sučelja | gumb „Probudi" uz host (DHCP rezervacije, iz inventara) | magic packet iz Go-a (bez alata), na sve lokalne mreže/VLAN-ove | 0,5 dana | niska, ali se lijepo pokazuje |
+| ~~A10~~ | **NAPRAVLJENO (v0.53.0)** — uvjetno prosljeđivanje DNS-a na Windows/AD DNS | upiti za interne domene (npr. `tvrtka.local`) idu na domenski poslužitelj, ostalo na internet — bez punog AD-a na uređaju | dnsmasq `server=/domena/ip` + `rebind_domain` da zaštita od rebind-a ne odbaci privatne odgovore | 1 dan | **visoka** kad postoji AD |
 
 ### B. Zaštita
 
@@ -192,7 +199,9 @@ paketa. Trud je procijenjen u danima rada.
 | **D5** | **Izvoz mjerenja u vanjski nadzor** | Zabbix/Grafana/Prometheus kod korisnika | `prometheus-node-exporter-lua` ili vlastiti `/metrics` | 1–2 dana | srednja |
 | **D6** | **SNMP** | uređaj vidljiv u postojećem korisnikovom nadzoru | `mini_snmpd` (puni `net-snmp` nije u repozitoriju) | 1–2 dana | srednja |
 | **D7** | **Mjerenje brzine veze** | dokaz da veza daje ono što pružatelj naplaćuje | `iperf3` ili speedtest skripta, raspored + graf | 1–2 dana | srednja |
-| ~~D8~~ | **NAPRAVLJENO (v0.47.0)** — nadzor UPS-a | uredno gašenje pri praznoj bateriji (upsmon), stanje u sučelju, e-mail na nestanak struje / povratak / slabu bateriju / gubitak veze | NUT paketi na klik, upsd samo na 127.0.0.1, Saguaro čita `upsc` svakih 15 s | 2 dana | srednja (ako ima UPS) |
+| ~~D8~~ | **NAPRAVLJENO (v0.47.0, prošireno v0.55–0.56)** — nadzor UPS-a | uredno gašenje pri praznoj bateriji (upsmon), stanje u sučelju, e-mail na nestanak struje / povratak / slabu bateriju / gubitak veze; **tri načina: USB, udaljeni NUT, i Saguaro kao NUT poslužitelj** drugima | NUT paketi na klik, Saguaro čita `upsc` svakih 15 s | 2 dana | srednja (ako ima UPS) |
+| ~~D9~~ | **NAPRAVLJENO (v0.49–0.51)** — mrežni alati i dnevnik firewalla | ping/traceroute/DNS lookup/susjedi (ARP) i provjera porta iz sučelja, prekid pojedine veze; dnevnik firewalla s brojačima pogodaka i preslagivanjem redoslijeda pravila | ugrađeno u Go (bez shella), `conntrack` na klik za prekid veze | — | **visoka**, svakodnevna dijagnostika |
+| ~~D10~~ | **NAPRAVLJENO (v0.48.0)** — nadzor svih servisa + upravljanje uređajem | pad bilo kojeg servisa (dnsmasq/haproxy/bird/upsd…) javlja se e-mailom, ne samo VPN; ponovno pokretanje i gašenje uređaja iz sučelja | prošireni watchdog + `reboot`/`poweroff` uz potvrdu, samo administrator | — | **visoka** |
 
 ### E. Pristup sustavu i sigurnost upravljanja
 
@@ -246,12 +255,22 @@ Ažurirano nakon revizije 08.08.2026. (vidi `docs/AUDIT-2026-08-08.md`).
 Napravljeno u međuvremenu: ~~A3 IPv6~~, ~~F1 obrnuti proxy~~, ~~D8 nadzor UPS-a~~.
 Odbijeno: A5 HA par, A4 mobilna pričuvna veza, E4 Active Directory.
 
+Napravljeno u ovom krugu (v0.48–0.56, vidi `docs/PROVJERA-2026-08-09.md`):
+
+- ~~**Operativna vidljivost**~~ — nadzor svih servisa, a ne samo VPN-a
+  (v0.48.0); dnevnik firewalla s brojačima i redoslijedom pravila (v0.49.0);
+  mrežni alati u Diagnosticsu — ping/traceroute/DNS lookup/susjedi/provjera
+  porta/prekid veze (v0.50–0.51); reboot i gašenje iz sučelja (v0.48.0).
+- ~~**Uvjetno prosljeđivanje DNS-a na Windows/AD DNS**~~ (v0.53.0) — upiti za
+  interne domene idu na AD poslužitelj, uz zaštitu od rebind-a.
+- ~~**Mrežni UPS**~~ — udaljeni NUT i Saguaro kao NUT poslužitelj (v0.55–0.56).
+- ~~**Wake-on-LAN**~~ iz inventara (v0.52.0), popis paketa u backupu (v0.52.0),
+  ~~SVG ikone~~ (v0.54.0), cjelovita sigurnosna revizija (v0.56.2–0.56.4).
+
 Sljedeći logični zahvati po redu prioriteta (iz revizije):
 
-1. **Operativna vidljivost** — nadzor svih servisa (ne samo VPN-a), dnevnik
-   firewalla s brojačima, mrežni alati (ping/traceroute/lookup) u sučelju,
-   reboot/gašenje iz sučelja.
-2. D5+D6 izvoz mjerenja (Prometheus `/metrics` + SNMP), D4 povijest prometa.
+1. D4 povijest prometa (dnevni/tjedni graf po mreži).
+2. D5+D6 izvoz mjerenja (Prometheus `/metrics` + SNMP) — svjesno odgođeno.
 3. C2 IPsec (za site-to-site prema tuđoj opremi), G2 predlošci postavki.
 4. G1 središnje upravljanje s više uređaja.
 
